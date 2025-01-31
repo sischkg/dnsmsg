@@ -97,6 +97,7 @@ func NewDomainname(name string) (Domainname, error) {
 		} else if c == '.' && !escaped {
 			d = append(d, label)
 			length += 1
+			label = []byte{}
 		} else {
 			label = append(label, byte(c))
 			length += 1
@@ -125,6 +126,7 @@ func (name *Domainname) String() string {
 			}
 			buf.WriteByte(c)
 		}
+		buf.WriteByte('.')
 	}
 
 	return buf.String()

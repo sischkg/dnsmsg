@@ -4,12 +4,8 @@ type RecordNS struct {
 	nsname Domainname
 }
 
-func (ns RecordNS) Size() uint32 {
-	return ns.nsname.Size()
-}
-
-func (a RecordNS) Type() uint16 {
-	return 2
+func (a RecordNS) Type() ResourceType {
+	return TYPE_NS
 }
 
 func (ns RecordNS) String() string {
@@ -20,8 +16,12 @@ func (ns RecordNS) CanonicalWireFormat() []byte {
 	return ns.nsname.CanonicalWireFormat()
 }
 
-func (ns RecordNS) AppendWireFormat(w *WireFormat, db *NameCompressionDB) {
-	w.AppendDomainname(ns.nsname, db)
+func (ns RecordNS) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 {
+	return w.AppendDomainname(ns.nsname, db)
+}
+
+func (ns RecordNS) AppendCanonicalWireFormat(w *WireFormat) uint32 {
+	return w.AppendCanonicalDomainname(ns.nsname)
 }
 
 func NewRecordNSFromString(n string) (ns RecordNS, err error) {
@@ -37,10 +37,10 @@ func NewRecordNS(n Domainname) (ns RecordNS) {
 	return
 }
 
-func ParseRecordNS(rdata []byte) (ns RecordNS, err error) {
-	name, err := NewCanonicalDomainnameFromBytes(rdata)
+func ParseRecordNS(w WireFormat, begin uint32) (ns RecordNS, end uint32, err error) {
+	name, end, err := NewDomainnameFromWireFormat(w, begin)
 	if err != nil {
 		return
 	}
-	return NewRecordNS(name), err
+	return NewRecordNS(name), end, err
 }

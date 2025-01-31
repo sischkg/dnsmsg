@@ -16,12 +16,8 @@ type RecordSOA struct {
 	minimum uint32
 }
 
-func (soa RecordSOA) Size() uint32 {
-	return soa.mname.Size() + soa.rname.Size() + 4 + 4 + 4 + 4 + 4
-}
-
-func (soa RecordSOA) Type() uint16 {
-	return 6
+func (soa RecordSOA) Type() ResourceType {
+	return TYPE_SOA
 }
 
 func (soa RecordSOA) String() string {
@@ -40,14 +36,30 @@ func (soa RecordSOA) CanonicalWireFormat() []byte {
 	return w
 }
 
-func (soa RecordSOA) AppendWireFormat(w *WireFormat, db *NameCompressionDB) {
-	w.AppendDomainname(soa.mname, db)
-	w.AppendDomainname(soa.rname, db)
-	w.AppendUInt32(soa.serial)
-	w.AppendUInt32(soa.refresh)
-	w.AppendUInt32(soa.retry)
-	w.AppendUInt32(soa.expire)
-	w.AppendUInt32(soa.minimum)
+func (soa RecordSOA) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 {
+	var size uint32 = 0
+	size += w.AppendDomainname(soa.mname, db)
+	size += w.AppendDomainname(soa.rname, db)
+	size += w.AppendUInt32(soa.serial)
+	size += w.AppendUInt32(soa.refresh)
+	size += w.AppendUInt32(soa.retry)
+	size += w.AppendUInt32(soa.expire)
+	size += w.AppendUInt32(soa.minimum)
+
+	return size
+}
+
+func (soa RecordSOA) AppendCanonicalWireFormat(w *WireFormat) uint32 {
+	var size uint32 = 0
+	size += w.AppendCanonicalDomainname(soa.mname)
+	size += w.AppendCanonicalDomainname(soa.rname)
+	size += w.AppendUInt32(soa.serial)
+	size += w.AppendUInt32(soa.refresh)
+	size += w.AppendUInt32(soa.retry)
+	size += w.AppendUInt32(soa.expire)
+	size += w.AppendUInt32(soa.minimum)
+
+	return size
 }
 
 func NewRecordSOAFromString(s string) (soa RecordSOA, err error) {
@@ -92,10 +104,37 @@ func NewRecordSOA(mname, rname Domainname, serial, refresh, retry, expire, minim
 	return
 }
 
-func ParseRecordSOA(rdata []byte) (ns RecordNS, err error) {
-	name, err := NewCanonicalDomainnameFromBytes(rdata)
+func ParseRecordSOA(w WireFormat, begin uint32) (soa RecordSOA, end uint32, err error) {
+	var p uint32
+	soa.mname, p, err = NewDomainnameFromWireFormat(w, begin)
 	if err != nil {
 		return
 	}
-	return NewRecordNS(name), err
+	soa.rname, p, err = NewDomainnameFromWireFormat(w, p)
+	if err != nil {
+		return
+	}
+
+	if p+20 > w.Size() {
+		err = fmt.Errorf("too few message size for SOA")
+	}
+
+	serial, _ := w.GetUInt32(p)
+	p += 4
+	soa.serial = serial
+	refresh, _ := w.GetUInt32(p)
+	p += 4
+	soa.refresh = refresh
+	retry, _ := w.GetUInt32(p)
+	p += 4
+	soa.retry = retry
+	expire, _ := w.GetUInt32(p)
+	p += 4
+	soa.expire = expire
+	minimum, _ := w.GetUInt32(p)
+	p += 4
+	soa.minimum = minimum
+
+	end = p
+	return
 }

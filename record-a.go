@@ -9,12 +9,8 @@ type RecordA struct {
 	address [4]byte
 }
 
-func (a RecordA) Size() int32 {
-	return 4
-}
-
-func (a RecordA) Type() uint16 {
-	return 1
+func (a RecordA) Type() ResourceType {
+	return TYPE_A
 }
 
 func (a RecordA) String() string {
@@ -52,11 +48,11 @@ func NewRecordA(addr [4]byte) (address RecordA) {
 	return
 }
 
-func ParseRecordA(msg []byte, pos uint32) (a RecordA, err error) {
-	if pos+4 > uint32(len(msg)) {
+func ParseRecordA(msg WireFormat, begin uint32) (a RecordA, end uint32, err error) {
+	if begin+4 > uint32(msg.Size()) {
 		err = fmt.Errorf("invalid A record RDATA size")
 		return
 	}
 
-	return NewRecordA([4]byte(msg[pos : pos+4])), nil
+	return NewRecordA([4]byte(msg[begin : begin+4])), begin + 4, nil
 }

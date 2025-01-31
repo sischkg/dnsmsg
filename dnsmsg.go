@@ -165,8 +165,7 @@ func ParseQuestionSectionEntry(w WireFormat, p uint32) (q QuestionSectionEntry, 
 }
 
 type RDATA interface {
-	Size(*WireFormat, *NameCompressionDB) uint32
-	Type() uint16
+	Type() ResourceType
 	String() string
 	CanonicalWireFormat() []byte
 	AppendWireFormat(*WireFormat, *NameCompressionDB) uint32
@@ -175,8 +174,8 @@ type RDATA interface {
 
 type ResourceRecord struct {
 	Name  Domainname
-	Class uint16
-	Type  uint16
+	Class ResourceClass
+	Type  ResourceType
 	TTL   uint32
 	RData RDATA
 }
@@ -190,14 +189,47 @@ func (rr ResourceRecord) String() string {
 func AppendResourceRecord(w *WireFormat, rr ResourceRecord, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
 	size += w.AppendDomainname(rr.Name, db)
-	size += w.AppendUInt16(rr.Class)
-	size += w.AppendUInt16(rr.Type)
+	size += w.AppendUInt16(uint16(rr.Class))
+	size += w.AppendUInt16(uint16(rr.Type))
 	size += w.AppendUInt32(rr.TTL)
 	size += rr.RData.AppendWireFormat(w, db)
 	return size
 }
 
-func ParseResourceRecord(w WireFormat, p uint32) (rr ResourceRecord, end uint32, err error) {
+func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uint32, err error) {
+	var p uint32
+	rr.Name, p, err = NewDomainnameFromWireFormat(w, p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse domainname(%s)", err)
+		return
+	}
+	if p+10 > w.Size() {
+		err = fmt.Errorf("not enough size for resource record")
+		return
+	}
+
+	class, _ := w.GetUInt16(p)
+	rr.Class = ResourceClass(class)
+	p += 2
+	rtype, _ := w.GetUInt16(p)
+	rr.Type = ResourceType(rtype)
+	p += 2
+	rr.TTL, _ = w.GetUInt32(p)
+	p += 4
+	size, _ := w.GetUInt16(p)
+	p += 2
+	end = p + uint32(size)
+
+	switch rr.Type {
+	case TYPE_A:
+		rr.RData, _, err = ParseRecordA(w, p)
+	case TYPE_NS:
+		rr.RData, _, err = ParseRecordNS(w, p)
+	case TYPE_SOA:
+		rr.RData, _, err = ParseRecordSOA(w, p)
+	default:
+		rr.RData, _, err = ParseRecordRaw(w, p, end)
+	}
 
 	return
 }
