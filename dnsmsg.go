@@ -292,6 +292,7 @@ func (msg *Message) SetQuery(qname string, qclass ResourceClass, qtype ResourceT
 	q.Type = qtype
 
 	msg.QuestionSection = []QuestionSectionEntry{q}
+	msg.QDCOUNT = 1
 	return nil
 }
 
@@ -417,6 +418,11 @@ func ParseWireFormat(w WireFormat) (msg Message, err error) {
 		}
 		msg.AdditionalSection = append(msg.AdditionalSection, rr)
 	}
+
+	msg.QDCOUNT = uint16(len(msg.QuestionSection))
+	msg.ANCOUNT = uint16(len(msg.AnswerSection))
+	msg.NSCOUNT = uint16(len(msg.AuthoritySection))
+	msg.ARCOUNT = uint16(len(msg.AdditionalSection))
 
 	return
 }
