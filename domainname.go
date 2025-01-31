@@ -104,6 +104,7 @@ func NewDomainname(name string) (Domainname, error) {
 			escaped = false
 		}
 	}
+	d = append(d, label)
 	length += 1 // "root label "."
 
 	if escaped {

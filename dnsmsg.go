@@ -126,7 +126,7 @@ type QuestionSectionEntry struct {
 }
 
 func (q QuestionSectionEntry) String() string {
-	return fmt.Sprintf("%s %s %s", q.QName.String(), q.Class.String(), q.Class.String())
+	return fmt.Sprintf("%s %s %s", q.QName.String(), q.Class.String(), q.Type.String())
 }
 
 func AppendQuestionSectionEntry(w *WireFormat, q QuestionSectionEntry, db *NameCompressionDB) uint32 {
@@ -261,6 +261,11 @@ type Message struct {
 func (msg Message) String() string {
 	var str string
 	str += fmt.Sprintf("Header: ID: %d, QR: %d, OPCODE: %d, AA: %d, TC: %d, RD: %d, RA: %d, CD: %d, RCODE: %d\n", msg.ID, msg.QR, msg.OPCODE, msg.AA, msg.TC, msg.RA, msg.AD, msg.CD, msg.RCODE)
+	str += fmt.Sprintf("QDCOUNT: %d\n", msg.QDCOUNT)
+	str += fmt.Sprintf("ANCOUNT: %d\n", msg.ANCOUNT)
+	str += fmt.Sprintf("NSCOUNT: %d\n", msg.NSCOUNT)
+	str += fmt.Sprintf("ARCOUNT: %d\n", msg.ARCOUNT)
+
 	for _, q := range msg.QuestionSection {
 		str += fmt.Sprintf("%s\n", q.String())
 	}
