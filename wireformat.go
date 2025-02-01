@@ -100,7 +100,7 @@ func (w WireFormat) GetUInt16(i uint32) (v uint16, e error) {
 	if i > uint32(len(w)+2) {
 		return 0, fmt.Errorf("out of bound access")
 	}
-	binary.Decode((w)[i:i+2], binary.NativeEndian, v)
+	binary.Read(bytes.NewReader((w)[i:i+2]), binary.NativeEndian, &v)
 	e = nil
 	return
 }
@@ -109,7 +109,7 @@ func (w WireFormat) GetUInt32(i uint32) (v uint32, e error) {
 	if i > uint32(len(w)+4) {
 		return 0, fmt.Errorf("out of bound access")
 	}
-	binary.Decode((w)[i:i+4], binary.NativeEndian, v)
+	binary.Read(bytes.NewReader((w)[i:i+4]), binary.NativeEndian, &v)
 	e = nil
 	return
 }
