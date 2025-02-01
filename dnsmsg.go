@@ -132,8 +132,8 @@ func (q QuestionSectionEntry) String() string {
 func AppendQuestionSectionEntry(w *WireFormat, q QuestionSectionEntry, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
 	size += w.AppendDomainname(q.QName, db)
-	size += w.AppendUInt16(uint16(q.Class))
 	size += w.AppendUInt16(uint16(q.Type))
+	size += w.AppendUInt16(uint16(q.Class))
 	return size
 }
 
@@ -189,10 +189,14 @@ func (rr ResourceRecord) String() string {
 func AppendResourceRecord(w *WireFormat, rr ResourceRecord, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
 	size += w.AppendDomainname(rr.Name, db)
-	size += w.AppendUInt16(uint16(rr.Class))
 	size += w.AppendUInt16(uint16(rr.Type))
+	size += w.AppendUInt16(uint16(rr.Class))
 	size += w.AppendUInt32(rr.TTL)
-	size += rr.RData.AppendWireFormat(w, db)
+	posRDLen := w.Size()
+	size += w.AppendUInt16(0) // dummy data
+	rdlen := rr.RData.AppendWireFormat(w, db)
+	w.PutUint16(posRDLen, uint16(rdlen))
+	size += rdlen
 	return size
 }
 
