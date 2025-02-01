@@ -264,7 +264,7 @@ type Message struct {
 
 func (msg Message) String() string {
 	var str string
-	str += fmt.Sprintf("Header: ID: %d, QR: %d, OPCODE: %d, AA: %d, TC: %d, RD: %d, RA: %d, CD: %d, RCODE: %d\n", msg.ID, msg.QR, msg.OPCODE, msg.AA, msg.TC, msg.RA, msg.AD, msg.CD, msg.RCODE)
+	str += fmt.Sprintf("Header: ID: %d, QR: %d, OPCODE: %d, AA: %d, TC: %d, RD: %d, RA: %d, AD: %d, CD: %d, RCODE: %d\n", msg.ID, msg.QR, msg.OPCODE, msg.AA, msg.TC, msg.RD, msg.RA, msg.AD, msg.CD, msg.RCODE)
 	str += fmt.Sprintf("QDCOUNT: %d\n", msg.QDCOUNT)
 	str += fmt.Sprintf("ANCOUNT: %d\n", msg.ANCOUNT)
 	str += fmt.Sprintf("NSCOUNT: %d\n", msg.NSCOUNT)
