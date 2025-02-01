@@ -357,8 +357,9 @@ func ParseHeader(w WireFormat, msg *Message) (uint32, error) {
 	msg.ID, _ = w.GetUInt16(p)
 	p += 2
 	flags1, _ := w.GetUInt8(p)
+	p += 1
 	flags2, _ := w.GetUInt8(p)
-	p += 2
+	p += 1
 
 	msg.QR = 0x01 & (flags1 >> 7)
 	msg.OPCODE = 0x0f & (flags1 >> 3)
