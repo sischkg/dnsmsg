@@ -306,21 +306,21 @@ func (w *WireFormat) WriteWireFormat(msg Message) uint32 {
 	size += w.AppendUInt16(msg.ID)
 
 	var flags1 uint8 = 0
-	flags1 |= (0x01 & msg.QR)
-	flags1 |= ((0x0f & msg.OPCODE) << 1)
-	flags1 |= ((0x01 & msg.AA) << 5)
-	flags1 |= ((0x01 & msg.TC) << 6)
-	flags1 |= ((0x01 & msg.RD) << 7)
+	flags1 |= (0x01 & msg.QR) << 7
+	flags1 |= (0x0f & msg.OPCODE) << 3
+	flags1 |= (0x01 & msg.AA) << 2
+	flags1 |= (0x01 & msg.TC) << 1
+	flags1 |= (0x01 & msg.RD)
 
 	fmt.Printf("RD: %d\n", msg.RD)
 	fmt.Printf("flag1: %d\n", flags1)
 
 	var flags2 uint8 = 0
-	flags2 |= 0x01 & msg.RA
-	flags2 |= (0x01 & msg.Z) << 1
-	flags2 |= (0x01 & msg.AD) << 2
-	flags2 |= (0x01 & msg.CD) << 3
-	flags2 |= (0x0f & msg.RCODE) << 4
+	flags2 |= (0x01 & msg.RA) << 7
+	flags2 |= (0x01 & msg.Z) << 6
+	flags2 |= (0x01 & msg.AD) << 5
+	flags2 |= (0x01 & msg.CD) << 4
+	flags2 |= (0x0f & msg.RCODE)
 
 	size += w.AppendUInt8(flags1)
 	size += w.AppendUInt8(flags2)
