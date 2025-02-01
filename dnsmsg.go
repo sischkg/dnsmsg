@@ -360,17 +360,17 @@ func ParseHeader(w WireFormat, msg *Message) (uint32, error) {
 	flags2, _ := w.GetUInt8(p)
 	p += 2
 
-	msg.QR = 0x01 & flags1
-	msg.OPCODE = 0x0f & (flags1 >> 1)
-	msg.AA = 0x01 & (flags1 >> 5)
-	msg.TC = 0x01 & (flags1 >> 6)
-	msg.RD = 0x01 & (flags1 >> 7)
+	msg.QR = 0x01 & (flags1 >> 7)
+	msg.OPCODE = 0x0f & (flags1 >> 3)
+	msg.AA = 0x01 & (flags1 >> 2)
+	msg.TC = 0x01 & (flags1 >> 1)
+	msg.RD = 0x01 & (flags1 >> 0)
 
-	msg.RA = 0x01 & flags2
-	msg.Z = 0x01 & (flags2 >> 1)
-	msg.AD = 0x01 & (flags2 >> 2)
-	msg.CD = 0x01 & (flags2 >> 3)
-	msg.RCODE = 0x0f & (flags2 >> 4)
+	msg.RA = 0x01 & (flags2 >> 7)
+	msg.Z = 0x01 & (flags2 >> 6)
+	msg.AD = 0x01 & (flags2 >> 5)
+	msg.CD = 0x01 & (flags2 >> 4)
+	msg.RCODE = 0x0f & (flags2 >> 0)
 
 	msg.QDCOUNT, _ = w.GetUInt16(p)
 	p += 2
