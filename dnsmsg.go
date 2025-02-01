@@ -312,6 +312,9 @@ func (w *WireFormat) WriteWireFormat(msg Message) uint32 {
 	flags1 |= ((0x01 & msg.TC) << 6)
 	flags1 |= ((0x01 & msg.RD) << 7)
 
+	fmt.Printf("RD: %d\n", msg.RD)
+	fmt.Printf("flag1: %d\n", flags1)
+
 	var flags2 uint8 = 0
 	flags2 |= 0x01 & msg.RA
 	flags2 |= (0x01 & msg.Z) << 1
