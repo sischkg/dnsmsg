@@ -61,7 +61,7 @@ func NewDomainnameFromWireFormat(msg []byte, begin uint32) (Domainname, uint32, 
 			pos++
 
 			if offset >= begin {
-				return name, pos, fmt.Errorf("invalid domainname(maybe loop)")
+				return name, pos, fmt.Errorf("invalid domainname(maybe loop, begin: %d, offset: %d)", begin, offset)
 			}
 			suffix, _, err := NewDomainnameFromWireFormat(msg, uint32(offset))
 			if err != nil {
