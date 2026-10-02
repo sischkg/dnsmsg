@@ -24,6 +24,20 @@ func (soa RecordSOA) String() string {
 	return fmt.Sprintf("%s %s %d %d %d %d %d", soa.mname.String(), soa.rname.String(), soa.serial, soa.refresh, soa.retry, soa.expire, soa.minimum)
 }
 
+func (lhs RecordSOA) Equal(rhs RecordSOA) bool {
+	return lhs.mname.Equal(rhs.mname) && lhs.rname.Equal(rhs.rname) &&
+		lhs.serial == rhs.serial && lhs.refresh == rhs.refresh &&
+		lhs.retry == rhs.retry && lhs.expire == rhs.expire &&
+		lhs.minimum == rhs.minimum
+}
+
+func (a RecordSOA) Size(w WireFormat, db *NameCompressionDB) uint32 {
+	// Compute the actual RDATA size: two domain names + 5 × 4 bytes for timers
+	mnameSize, _ := domainnameWireSize(a.mname)
+	rnameSize, _ := domainnameWireSize(a.rname)
+	return mnameSize + rnameSize + 5*4
+}
+
 func (soa RecordSOA) CanonicalWireFormat() []byte {
 	var w WireFormat
 	w.AppendCanonicalDomainname(soa.mname)
@@ -117,21 +131,37 @@ func ParseRecordSOA(w WireFormat, begin uint32) (soa RecordSOA, end uint32, err 
 
 	if p+20 > w.Size() {
 		err = fmt.Errorf("too few message size for SOA")
+		return
 	}
 
-	serial, _ := w.GetUInt32(p)
+	serial, err := w.GetUInt32(p)
+	if err != nil {
+		return
+	}
 	p += 4
 	soa.serial = serial
-	refresh, _ := w.GetUInt32(p)
+	refresh, err := w.GetUInt32(p)
+	if err != nil {
+		return
+	}
 	p += 4
 	soa.refresh = refresh
-	retry, _ := w.GetUInt32(p)
+	retry, err := w.GetUInt32(p)
+	if err != nil {
+		return
+	}
 	p += 4
 	soa.retry = retry
-	expire, _ := w.GetUInt32(p)
+	expire, err := w.GetUInt32(p)
+	if err != nil {
+		return
+	}
 	p += 4
 	soa.expire = expire
-	minimum, _ := w.GetUInt32(p)
+	minimum, err := w.GetUInt32(p)
+	if err != nil {
+		return
+	}
 	p += 4
 	soa.minimum = minimum
 

@@ -1,0 +1,74 @@
+package dnsmsg
+
+import (
+	"fmt"
+	"net/netip"
+)
+
+type RecordAAAA struct {
+	address [16]byte
+}
+
+func (aaaa RecordAAAA) Type() ResourceType {
+	return TYPE_AAAA
+}
+
+func (aaaa RecordAAAA) String() string {
+	ip := netip.AddrFrom16(aaaa.address)
+	return ip.String()
+}
+
+func (aaaa RecordAAAA) CanonicalWireFormat() []byte {
+	return aaaa.address[:]
+}
+
+func (aaaa RecordAAAA) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 {
+	return w.AppendBytes(aaaa.address[:])
+}
+
+func (aaaa RecordAAAA) AppendCanonicalWireFormat(w *WireFormat) uint32 {
+	return w.AppendBytes(aaaa.address[:])
+}
+
+func NewRecordAAAAFromString(addr string) (record RecordAAAA, err error) {
+	ip, err := netip.ParseAddr(addr)
+	if err != nil {
+		return
+	}
+	if ip.Is4() {
+		err = fmt.Errorf("%s is not IPv6 address", addr)
+		return
+	}
+	record.address = ip.As16()
+	return
+}
+
+func NewRecordAAAA(addr [16]byte) (record RecordAAAA) {
+	record.address = addr
+	return
+}
+
+// ParseRecordAAAA parses an AAAA record from the wire format.
+// The AAAA address is 16 bytes in network byte order (RFC 4038).
+func ParseRecordAAAA(msg WireFormat, begin uint32) (aaaa RecordAAAA, end uint32, err error) {
+	if begin+16 > uint32(msg.Size()) {
+		err = fmt.Errorf("invalid AAAA record RDATA size")
+		return
+	}
+	// The wire format uses network byte order which matches netip's 16-byte representation.
+	ip, ok := netip.AddrFromSlice(msg[begin : begin+16])
+	if !ok {
+		err = fmt.Errorf("cannot parse AAAA address")
+		return
+	}
+	if ip.Is4() {
+		err = fmt.Errorf("AAAA record contains IPv4-mapped address")
+		return
+	}
+	aaaa.address = ip.As16()
+	end = begin + 16
+	return
+}
+
+// AppendUInt16 is available on WireFormat, used by MX.
+// Re-exported here for documentation only; MX uses the method directly.

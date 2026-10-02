@@ -42,9 +42,11 @@ const (
 type ResourceType uint16
 
 const (
-	TYPE_A   ResourceType = 1
-	TYPE_NS  ResourceType = 2
-	TYPE_SOA ResourceType = 6
+	TYPE_A    ResourceType = 1
+	TYPE_NS   ResourceType = 2
+	TYPE_SOA  ResourceType = 6
+	TYPE_MX   ResourceType = 15
+	TYPE_AAAA ResourceType = 28
 )
 
 func (t ResourceType) String() string {
@@ -53,8 +55,10 @@ func (t ResourceType) String() string {
 		return "A"
 	case TYPE_NS:
 		return "NS"
-	case TYPE_SOA:
-		return "SOA"
+	case TYPE_MX:
+		return "MX"
+	case TYPE_AAAA:
+		return "AAAA"
 	default:
 		return fmt.Sprintf("TYPE%d", t)
 	}
@@ -137,25 +141,26 @@ func AppendQuestionSectionEntry(w *WireFormat, q QuestionSectionEntry, db *NameC
 	return size
 }
 
-func ParseQuestionSectionEntry(w WireFormat, p uint32) (q QuestionSectionEntry, end uint32, err error) {
-	q.QName, p, err = NewDomainnameFromWireFormat(w, p)
+func ParseQuestionSectionEntry(w WireFormat, begin uint32) (q QuestionSectionEntry, end uint32, err error) {
+	var p uint32
+	q.QName, p, err = NewDomainnameFromWireFormat(w, begin)
 	if err != nil {
 		err = fmt.Errorf("cannot parse QNAME(%s)", err)
 		return
 	}
 
-	c, err := w.GetUInt16(p)
-	q.Class = ResourceClass(c)
-	if err != nil {
-		err = fmt.Errorf("cannot parse QCLASS(%s)", err)
-		return
-	}
-	p += 2
-
 	t, err := w.GetUInt16(p)
 	q.Type = ResourceType(t)
 	if err != nil {
 		err = fmt.Errorf("cannot parse QTYPE(%s)", err)
+		return
+	}
+	p += 2
+
+	c, err := w.GetUInt16(p)
+	q.Class = ResourceClass(c)
+	if err != nil {
+		err = fmt.Errorf("cannot parse QCLASS(%s)", err)
 		return
 	}
 	p += 2
@@ -202,7 +207,7 @@ func AppendResourceRecord(w *WireFormat, rr ResourceRecord, db *NameCompressionD
 
 func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uint32, err error) {
 	var p uint32
-	rr.Name, p, err = NewDomainnameFromWireFormat(w, p)
+	rr.Name, p, err = NewDomainnameFromWireFormat(w, begin)
 	if err != nil {
 		err = fmt.Errorf("cannot parse domainname(%s)", err)
 		return
@@ -212,11 +217,11 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 		return
 	}
 
-	class, _ := w.GetUInt16(p)
-	rr.Class = ResourceClass(class)
-	p += 2
 	rtype, _ := w.GetUInt16(p)
 	rr.Type = ResourceType(rtype)
+	p += 2
+	class, _ := w.GetUInt16(p)
+	rr.Class = ResourceClass(class)
 	p += 2
 	rr.TTL, _ = w.GetUInt32(p)
 	p += 4
@@ -232,7 +237,7 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 	case TYPE_SOA:
 		rr.RData, _, err = ParseRecordSOA(w, p)
 	default:
-		rr.RData, _, err = ParseRecordRaw(w, p, end)
+		rr.RData, _, err = ParseRecordRaw(w, p, end, rr.Type)
 	}
 
 	return
@@ -311,9 +316,6 @@ func (w *WireFormat) WriteWireFormat(msg Message) uint32 {
 	flags1 |= (0x01 & msg.AA) << 2
 	flags1 |= (0x01 & msg.TC) << 1
 	flags1 |= (0x01 & msg.RD)
-
-	fmt.Printf("RD: %d\n", msg.RD)
-	fmt.Printf("flag1: %d\n", flags1)
 
 	var flags2 uint8 = 0
 	flags2 |= (0x01 & msg.RA) << 7

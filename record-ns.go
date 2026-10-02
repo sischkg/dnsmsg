@@ -12,6 +12,10 @@ func (ns RecordNS) String() string {
 	return ns.nsname.String()
 }
 
+func (a RecordNS) Size(w WireFormat, db *NameCompressionDB) uint32 {
+	return 4
+}
+
 func (ns RecordNS) CanonicalWireFormat() []byte {
 	return ns.nsname.CanonicalWireFormat()
 }
