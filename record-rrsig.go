@@ -1,0 +1,246 @@
+package dnsmsg
+
+import (
+	"fmt"
+	"regexp"
+	"strconv"
+)
+
+// RecordRRSIG represents an RRSIG (Resource Record Signature) record per RFC 4034 Section 5.1
+type RecordRRSIG struct {
+	TypeCovered uint16
+	Algorithm   uint8
+	Labels      uint8
+	OrigTTL     uint32
+	Expiration  uint32
+	Inception   uint32
+	KeyTag      uint16
+	SignersName Domainname
+	Signature   []byte
+}
+
+func (r RecordRRSIG) Type() ResourceType {
+	return TYPE_RRSIG
+}
+
+func (r RecordRRSIG) String() string {
+	return fmt.Sprintf("%s %d %d %d %d %d %d %s %s",
+		ResourceType(r.TypeCovered).String(),
+		r.Algorithm,
+		r.Labels,
+		r.OrigTTL,
+		r.Expiration,
+		r.Inception,
+		r.KeyTag,
+		r.SignersName.String(),
+		encodeBase64(r.Signature),
+	)
+}
+
+func (r RecordRRSIG) CanonicalWireFormat() []byte {
+	w := new(WireFormat)
+	r.AppendCanonicalWireFormat(w)
+	return *w
+}
+
+func (r RecordRRSIG) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 {
+	var size uint32 = 0
+	size += w.AppendUInt16(r.TypeCovered)
+	size += w.AppendUInt8(r.Algorithm)
+	size += w.AppendUInt8(r.Labels)
+	size += w.AppendUInt32(r.OrigTTL)
+	size += w.AppendUInt32(r.Expiration)
+	size += w.AppendUInt32(r.Inception)
+	size += w.AppendUInt16(r.KeyTag)
+	size += w.AppendDomainname(r.SignersName, db)
+	size += w.AppendBytes(r.Signature)
+	return size
+}
+
+func (r RecordRRSIG) AppendCanonicalWireFormat(w *WireFormat) uint32 {
+	var size uint32 = 0
+	size += w.AppendUInt16(r.TypeCovered)
+	size += w.AppendUInt8(r.Algorithm)
+	size += w.AppendUInt8(r.Labels)
+	size += w.AppendUInt32(r.OrigTTL)
+	size += w.AppendUInt32(r.Expiration)
+	size += w.AppendUInt32(r.Inception)
+	size += w.AppendUInt16(r.KeyTag)
+	size += w.AppendCanonicalDomainname(r.SignersName)
+	size += w.AppendBytes(r.Signature)
+	return size
+}
+
+// NewRecordRRSIG creates a new RecordRRSIG from structured values
+func NewRecordRRSIG(typeCovered uint16, algorithm uint8, labels uint8, origTTL uint32,
+	expiration uint32, inception uint32, keyTag uint16, signersName Domainname, signature []byte) RecordRRSIG {
+	return RecordRRSIG{
+		TypeCovered: typeCovered,
+		Algorithm:   algorithm,
+		Labels:      labels,
+		OrigTTL:     origTTL,
+		Expiration:  expiration,
+		Inception:   inception,
+		KeyTag:      keyTag,
+		SignersName: signersName,
+		Signature:   signature,
+	}
+}
+
+// NewRecordRRSIGFromString parses an RRSIG record from presentation format string
+// Format: <type-covered> <algorithm> <labels> <orig-ttl> <expiration> <inception> <key-tag> <signers-name> <base64-signature>
+func NewRecordRRSIGFromString(s string) (RecordRRSIG, error) {
+	// Split by spaces, but handle domain name carefully
+	pattern := regexp.MustCompile(`^(\S+) (\d+) (\d+) (\d+) (\d+) (\d+) (\d+) (\S+) (\S+)$`)
+	matched := pattern.FindStringSubmatch(s)
+	if matched == nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid RRSIG record format "%s"`, s)
+	}
+
+	typeCoveredStr := matched[1]
+	var typeCovered uint16
+	// Try to parse as number first
+	if tc, err := strconv.ParseUint(typeCoveredStr, 10, 16); err == nil {
+		typeCovered = uint16(tc)
+	} else {
+		// Try as string name (A, NS, SOA, etc.)
+		t, err := NewType(typeCoveredStr)
+		if err != nil {
+			return RecordRRSIG{}, fmt.Errorf(`invalid type-covered "%s"`, typeCoveredStr)
+		}
+		typeCovered = uint16(t)
+	}
+
+	algorithm, err := strconv.ParseUint(matched[2], 10, 8)
+	if err != nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid algorithm "%s"`, matched[2])
+	}
+
+	labels, err := strconv.ParseUint(matched[3], 10, 8)
+	if err != nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid labels "%s"`, matched[3])
+	}
+
+	origTTL, err := strconv.ParseUint(matched[4], 10, 32)
+	if err != nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid orig-ttl "%s"`, matched[4])
+	}
+
+	expiration, err := strconv.ParseUint(matched[5], 10, 32)
+	if err != nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid expiration "%s"`, matched[5])
+	}
+
+	inception, err := strconv.ParseUint(matched[6], 10, 32)
+	if err != nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid inception "%s"`, matched[6])
+	}
+
+	keyTag, err := strconv.ParseUint(matched[7], 10, 16)
+	if err != nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid key-tag "%s"`, matched[7])
+	}
+
+	signersName, err := NewDomainname(matched[8])
+	if err != nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid signers-name "%s"`, matched[8])
+	}
+
+	signature, err := decodeBase64(matched[9])
+	if err != nil {
+		return RecordRRSIG{}, fmt.Errorf(`invalid signature "%s"`, matched[9])
+	}
+
+	return RecordRRSIG{
+		TypeCovered: typeCovered,
+		Algorithm:   uint8(algorithm),
+		Labels:      uint8(labels),
+		OrigTTL:     uint32(origTTL),
+		Expiration:  uint32(expiration),
+		Inception:   uint32(inception),
+		KeyTag:      uint16(keyTag),
+		SignersName: signersName,
+		Signature:   signature,
+	}, nil
+}
+
+// ParseRecordRRSIG parses an RRSIG record from wire format
+func ParseRecordRRSIG(w WireFormat, begin uint32) (r RecordRRSIG, end uint32, err error) {
+	var p uint32 = begin
+
+	typeCovered, err := w.GetUInt16(p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse type-covered: %w", err)
+		return
+	}
+	p += 2
+
+	algorithm, err := w.GetUInt8(p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse algorithm: %w", err)
+		return
+	}
+	p += 1
+
+	labels, err := w.GetUInt8(p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse labels: %w", err)
+		return
+	}
+	p += 1
+
+	origTTL, err := w.GetUInt32(p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse orig-ttl: %w", err)
+		return
+	}
+	p += 4
+
+	expiration, err := w.GetUInt32(p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse expiration: %w", err)
+		return
+	}
+	p += 4
+
+	inception, err := w.GetUInt32(p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse inception: %w", err)
+		return
+	}
+	p += 4
+
+	keyTag, err := w.GetUInt16(p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse key-tag: %w", err)
+		return
+	}
+	p += 2
+
+	signersName, p, err := NewDomainnameFromWireFormat(w, p)
+	if err != nil {
+		err = fmt.Errorf("cannot parse signers-name: %w", err)
+		return
+	}
+
+	// Signature is the remaining bytes
+	signature := w[p:]
+	if len(signature) == 0 {
+		err = fmt.Errorf("empty signature")
+		return
+	}
+
+	r = RecordRRSIG{
+		TypeCovered: typeCovered,
+		Algorithm:   algorithm,
+		Labels:      labels,
+		OrigTTL:     origTTL,
+		Expiration:  expiration,
+		Inception:   inception,
+		KeyTag:      keyTag,
+		SignersName: signersName,
+		Signature:   signature,
+	}
+	end = p + uint32(len(signature))
+	return
+}

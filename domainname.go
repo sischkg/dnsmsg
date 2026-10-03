@@ -407,3 +407,10 @@ func (db *NameCompressionDB) Add(name Domainname, p uint16) {
 	}
 	db.nameToPointer[name.DBKey()] = p
 }
+
+func (db *NameCompressionDB) Reset() {
+	if db == nil {
+		return
+	}
+	db.nameToPointer = make(map[[DOMAINNAME_MAX_LENGTH]byte]uint16)
+}

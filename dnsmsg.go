@@ -42,11 +42,14 @@ const (
 type ResourceType uint16
 
 const (
-	TYPE_A    ResourceType = 1
-	TYPE_NS   ResourceType = 2
-	TYPE_SOA  ResourceType = 6
-	TYPE_MX   ResourceType = 15
-	TYPE_AAAA ResourceType = 28
+	TYPE_A      ResourceType = 1
+	TYPE_NS     ResourceType = 2
+	TYPE_SOA    ResourceType = 6
+	TYPE_MX     ResourceType = 15
+	TYPE_AAAA   ResourceType = 28
+	TYPE_DS     ResourceType = 43
+	TYPE_RRSIG  ResourceType = 46
+	TYPE_DNSKEY ResourceType = 48
 )
 
 func (t ResourceType) String() string {
@@ -59,6 +62,12 @@ func (t ResourceType) String() string {
 		return "MX"
 	case TYPE_AAAA:
 		return "AAAA"
+	case TYPE_DS:
+		return "DS"
+	case TYPE_RRSIG:
+		return "RRSIG"
+	case TYPE_DNSKEY:
+		return "DNSKEY"
 	default:
 		return fmt.Sprintf("TYPE%d", t)
 	}
@@ -78,6 +87,16 @@ func NewType(s string) (ResourceType, error) {
 		return TYPE_NS, nil
 	case "SOA":
 		return TYPE_SOA, nil
+	case "MX":
+		return TYPE_MX, nil
+	case "AAAA":
+		return TYPE_AAAA, nil
+	case "DS":
+		return TYPE_DS, nil
+	case "RRSIG":
+		return TYPE_RRSIG, nil
+	case "DNSKEY":
+		return TYPE_DNSKEY, nil
 	default:
 		return 0, fmt.Errorf(`unknown resource type "%s"`, s)
 	}
@@ -236,6 +255,12 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 		rr.RData, _, err = ParseRecordNS(w, p)
 	case TYPE_SOA:
 		rr.RData, _, err = ParseRecordSOA(w, p)
+	case TYPE_DS:
+		rr.RData, _, err = ParseRecordDS(w, p)
+	case TYPE_RRSIG:
+		rr.RData, _, err = ParseRecordRRSIG(w, p)
+	case TYPE_DNSKEY:
+		rr.RData, _, err = ParseRecordDNSKEY(w, p)
 	default:
 		rr.RData, _, err = ParseRecordRaw(w, p, end, rr.Type)
 	}
