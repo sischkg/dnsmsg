@@ -3,6 +3,7 @@ package dnsmsg
 import (
 	"bytes"
 	"fmt"
+	"strings"
 )
 
 const (
@@ -15,6 +16,226 @@ const (
 	domainnameCompressionOffsetMask   uint32 = 0x3fff
 	domainnameCompressionMaxOffset    uint32 = domainnameCompressionOffsetMask
 )
+
+type Label struct {
+	data []byte
+}
+
+func NewLabelFromString(s string) (Label, error) {
+	if len(s) == 0 || len(s) >= 64 {
+		return Label{}, fmt.Errorf("invalid label length for %s(len=%d)", s, len(s))
+	}
+	return Label{data: []byte(s)}, nil
+}
+
+func NewLabel(s []byte) (Label, error) {
+	if len(s) == 0 || len(s) >= 64 {
+		return Label{}, fmt.Errorf("invalid label length for %s(len=%d)", s, len(s))
+	}
+	return Label{data: s}, nil
+}
+
+func NewRootLabel() Label {
+	return Label{data: []byte{}}
+}
+
+func (l Label) WireFormat() []byte {
+	b := []byte{uint8(len(l.data))}
+	for _, c := range l.data {
+		b = append(b, c)
+	}
+
+	return b
+}
+
+func (l Label) WriteWireFormat(w *WireFormat) uint32 {
+	return w.AppendBytes(l.WireFormat())
+}
+
+func (l Label) Size() uint32 {
+	return uint32(len(l.data))
+}
+
+func toLower(s byte) byte {
+	if 'A' <= s && s <= 'Z' {
+		return s - byte('A') + byte('a')
+	}
+	return s
+}
+
+func (lhs Label) Equal(rhs Label) bool {
+	if lhs.Size() != rhs.Size() {
+		return false
+	}
+	for i, r := range rhs.data {
+		if toLower(lhs.data[i]) != toLower(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func (l Label) CanonicalLabel() Label {
+	var dst []byte
+	for _, src := range l.data {
+		dst = append(dst, toLower(src))
+	}
+	n, _ := NewLabel(dst)
+	return n
+}
+
+func (l Label) String() string {
+	var buf bytes.Buffer
+
+	for _, c := range l.data {
+		switch {
+		case c == '.' || c == '\\':
+			buf.WriteByte('\\')
+			buf.WriteByte(c)
+		case c >= 0x21 && c <= 0x7e:
+			buf.WriteByte(c)
+		default:
+			buf.WriteByte('\\')
+			buf.WriteByte('0' + c/100)
+			buf.WriteByte('0' + (c/10)%10)
+			buf.WriteByte('0' + c%10)
+		}
+	}
+
+	return buf.String()
+}
+
+type DomainName struct {
+	labels []Label
+}
+
+func NewRootDomainName() DomainName {
+	return DomainName{labels: []Label{NewRootLabel()}}
+}
+
+func NewDomainNameFromString(name string) (DomainName, error) {
+	if name == "" || name == "." {
+		return NewRootDomainName(), nil
+	}
+
+	d := NewRootDomainName()
+	var label []byte
+	wireSize := uint32(1) // terminating root label
+
+	for pos := 0; pos < len(name); {
+		if name[pos] == '.' {
+			if len(label) == 0 {
+				return DomainName{}, fmt.Errorf("invalid domainname(empty label)")
+			}
+			increment := uint32(1 + len(label))
+			if wireSize > DOMAINNAME_MAX_LENGTH-increment {
+				return DomainName{}, fmt.Errorf("domainname %q is too long", name)
+			}
+			wireSize += increment
+			l, err := NewLabel(label)
+			if err != nil {
+				return DomainName{}, fmt.Errorf("bad label string %v of %s", label, name)
+			}
+			d.AppendLabel(l)
+			label = []byte{}
+			pos++
+			continue
+		}
+
+		octet, next, err := parsePresentationOctet(name, pos)
+		if err != nil {
+			return DomainName{}, err
+		}
+		if len(label) >= domainnameMaxLabelLength {
+			return DomainName{}, fmt.Errorf("domainname label is too long(length exceeds %d)", domainnameMaxLabelLength)
+		}
+		label = append(label, octet)
+		pos = next
+	}
+
+	// Append the final label here only for names that do not end in
+	// a dot; such labels were already flushed at their dot in the loop.
+	// AppendLabel maintains the terminating root label.  Each append
+	// above already bounds wireSize by DOMAINNAME_MAX_LENGTH.
+	if len(label) > 0 {
+		increment := uint32(1 + len(label))
+		if wireSize > DOMAINNAME_MAX_LENGTH-increment {
+			return DomainName{}, fmt.Errorf("domainname %q is too long", name)
+		}
+		wireSize += increment
+		l, e := NewLabel(label)
+		if e != nil {
+			return DomainName{}, fmt.Errorf("bad label string %v of %s", label, name)
+		}
+		d.AppendLabel(l)
+	}
+
+	return d, nil
+}
+
+func NewDomainNameFromLabel(ls []Label) (DomainName, error) {
+	return DomainName{labels: ls}, nil
+}
+
+// NewDomainNameFromWireFormat reads the domain name that begins at index in
+// the wire format.  Unlike the message parser shared by
+// NewDomainnameFromWireFormat, name compression is not expanded: a
+// compression pointer, a missing root label by the end of the wire format, or
+// a label type other than a length-prefixed label all produce an error.
+func NewDomainNameFromWireFormat(w *WireFormat, index uint32) (DomainName, error) {
+	if w == nil {
+		return DomainName{}, fmt.Errorf("wireFormat is nil")
+	}
+
+	name, _, err := parseDomainname(*w, index, false)
+	if err != nil {
+		return DomainName{}, err
+	}
+
+	d := NewRootDomainName()
+	for _, label := range name {
+		l, e := NewLabel(label)
+		if e != nil {
+			return DomainName{}, e
+		}
+		d.AppendLabel(l)
+	}
+	return d, nil
+}
+
+func (d DomainName) String() string {
+	labels := []string{}
+	for _, l := range d.labels {
+		labels = append(labels, l.String())
+	}
+	return strings.Join(labels, ".")
+}
+
+func (d *DomainName) AppendLabel(l Label) {
+	d.labels[len(d.labels)-1] = l
+	d.labels = append(d.labels, NewRootLabel())
+}
+
+func (d *DomainName) CanonicalDomainName() DomainName {
+	labels := []Label{}
+	for _, l := range d.labels {
+		labels = append(labels, l.CanonicalLabel())
+	}
+	canonical, _ := NewDomainNameFromLabel(labels)
+	return canonical
+}
+
+func (lhs DomainName) Equal(rhs DomainName) bool {
+	if len(lhs.labels) != len(rhs.labels) {
+		return false
+	}
+	for i, r := range rhs.labels {
+		if !r.Equal(lhs.labels[i]) {
+			return false
+		}
+	}
+	return true
+}
 
 type Domainname [][]byte
 
