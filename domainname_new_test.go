@@ -920,6 +920,88 @@ func TestDomainNameEqual(t *testing.T) {
 	}
 }
 
+func TestDomainNameParentDomainNames(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			// The name itself and every parent, most specific first,
+			// down to (but excluding) the root domain.
+			name:  "simple domain includes itself and parents",
+			input: "www.example.com.",
+			want: []string{
+				"www.example.com.",
+				"example.com.",
+				"com.",
+			},
+		},
+		{
+			// Parents are returned in canonical (lower-case) form.
+			name:  "upper case input returned canonical",
+			input: "WWW.EXAMPLE.COM.",
+			want: []string{
+				"www.example.com.",
+				"example.com.",
+				"com.",
+			},
+		},
+		{
+			name:  "single label has itself only",
+			input: "com.",
+			want: []string{
+				"com.",
+			},
+		},
+		{
+			name:  "deep name lists all the way to the second-level parent",
+			input: "a.b.example.co.jp.",
+			want: []string{
+				"a.b.example.co.jp.",
+				"b.example.co.jp.",
+				"example.co.jp.",
+				"co.jp.",
+				"jp.",
+			},
+		},
+		{
+			// The root domain is never part of the result, so for the
+			// root itself the slice is empty.
+			name:  "root domain yields empty slice",
+			input: ".",
+			want:  []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ndn, err := NewDomainNameFromString(tt.input)
+			if err != nil {
+				t.Fatalf("NewDomainNameFromString(%q) error = %v, want nil", tt.input, err)
+			}
+
+			got := ndn.ParentDomainNames()
+			if len(got) != len(tt.want) {
+				t.Fatalf("DomainName.ParentDomainNames() = %v, want %v", got, tt.want)
+			}
+			for i, w := range tt.want {
+				if s := got[i].String(); s != w {
+					t.Errorf("DomainName.ParentDomainNames()[%d].String() = %q, want %q", i, s, w)
+					continue
+				}
+			}
+
+			// The root domain (".") must not appear among the parents.
+			for i, p := range got {
+				if p.String() == "" {
+					t.Errorf("DomainName.ParentDomainNames()[%d] is the root domain, want non-root", i)
+				}
+			}
+		})
+	}
+}
+
 func TestDomainNameStringRoundtrip(t *testing.T) {
 	tests := []struct {
 		name  string

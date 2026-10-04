@@ -300,6 +300,29 @@ func (lhs DomainName) Equal(rhs DomainName) bool {
 	return true
 }
 
+// ParentDomainNames returns d itself followed by each of its parent
+// domains, most specific first: "www.example.com." yields
+// ["www.example.com.", "example.com.", "com."].
+// The root domain is never included in the result; for the root domain
+// itself, which has no non-root labels, the result is empty.  The names
+// are returned in canonical lower-case form (RFC 4034 Section 6.2).
+func (d DomainName) ParentDomainNames() []DomainName {
+	if len(d.labels) == 0 {
+		return []DomainName{}
+	}
+
+	var parents []DomainName
+	for i := 0; i < len(d.labels)-1; i++ {
+		parent, _ := NewDomainNameFromLabel(d.labels[i:])
+		parents = append(parents, parent.CanonicalDomainName())
+	}
+
+	return parents
+}
+
+type NameCompressDB struct {
+}
+
 type Domainname [][]byte
 
 type NameCompressionDB struct {
