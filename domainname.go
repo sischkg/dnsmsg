@@ -17,10 +17,18 @@ const (
 	domainnameCompressionMaxOffset    uint32 = domainnameCompressionOffsetMask
 )
 
+// Label is a single label of a DNS domain name: 1 to 63 octets (RFC 1035
+// Section 3.1). A label is an opaque byte string: it is preserved as stored,
+// compared case-insensitively with respect to ASCII letters (RFC 4343
+// Section 2), and available in canonical lowercase form via
+// CanonicalLabel (RFC 4034 Section 6.2). The only zero-length label
+// permitted is the root label, which terminates a DomainName.
 type Label struct {
 	data []byte
 }
 
+// NewLabelFromString constructs a Label from the octets of s.
+// s is used verbatim as the label's data. s must be 1-63 octets long.
 func NewLabelFromString(s string) (Label, error) {
 	if len(s) == 0 || len(s) >= 64 {
 		return Label{}, fmt.Errorf("invalid label length for %s(len=%d)", s, len(s))
@@ -28,6 +36,8 @@ func NewLabelFromString(s string) (Label, error) {
 	return Label{data: []byte(s)}, nil
 }
 
+// NewLabel constructs a Label from the byte slice s.
+// s must be 1-63 octets long.
 func NewLabel(s []byte) (Label, error) {
 	if len(s) == 0 || len(s) >= 64 {
 		return Label{}, fmt.Errorf("invalid label length for %s(len=%d)", s, len(s))
@@ -35,10 +45,15 @@ func NewLabel(s []byte) (Label, error) {
 	return Label{data: s}, nil
 }
 
+// NewRootLabel returns the root label (a zero-length label), which is used
+// as the last label of a DomainName.
 func NewRootLabel() Label {
 	return Label{data: []byte{}}
 }
 
+// WireFormat returns the wire-format encoding of l: a length octet
+// followed by the label's octets. For the root label, the result is a
+// single zero octet.
 func (l Label) WireFormat() []byte {
 	b := []byte{uint8(len(l.data))}
 	for _, c := range l.data {
@@ -48,14 +63,20 @@ func (l Label) WireFormat() []byte {
 	return b
 }
 
+// WriteWireFormat appends the wire-format encoding of l to w and returns
+// the number of octets written (0 if w is nil).
 func (l Label) WriteWireFormat(w *WireFormat) uint32 {
 	return w.AppendBytes(l.WireFormat())
 }
 
+// Size returns the length of the label in octets, excluding the length
+// octet. The size of the root label is 0.
 func (l Label) Size() uint32 {
 	return uint32(len(l.data))
 }
 
+// toLower maps an ASCII uppercase letter to its lowercase counterpart
+// and returns any other byte unchanged.
 func toLower(s byte) byte {
 	if 'A' <= s && s <= 'Z' {
 		return s - byte('A') + byte('a')
@@ -63,6 +84,9 @@ func toLower(s byte) byte {
 	return s
 }
 
+// Equal reports whether lhs and rhs are the same label.
+// Comparison is case insensitive with respect to ASCII letters,
+// as in RFC 4343 Section 2.
 func (lhs Label) Equal(rhs Label) bool {
 	if lhs.Size() != rhs.Size() {
 		return false
@@ -75,6 +99,8 @@ func (lhs Label) Equal(rhs Label) bool {
 	return true
 }
 
+// CanonicalLabel returns a copy of l with ASCII uppercase letters mapped
+// to lowercase, in the canonical form of RFC 4034 Section 6.2.
 func (l Label) CanonicalLabel() Label {
 	var dst []byte
 	for _, src := range l.data {
@@ -84,6 +110,10 @@ func (l Label) CanonicalLabel() Label {
 	return n
 }
 
+// String returns the presentation form of the label, as in RFC 1035
+// Section 5: printable octets (other than '.' and '\') are printed as-is,
+// while '.' and '\' are backslash-escaped and non-printable octets are
+// printed as three-digit decimal escapes such as "\065".
 func (l Label) String() string {
 	var buf bytes.Buffer
 
@@ -105,14 +135,27 @@ func (l Label) String() string {
 	return buf.String()
 }
 
+// DomainName is a DNS domain name: an ordered sequence of Labels from the
+// most specific to the least specific, terminated by the root label. The
+// total length of the name in wire format (RFC 1035 Section 4.1.4) must not
+// exceed 255 octets. The empty name (root domain) consists of the root
+// label alone.
 type DomainName struct {
 	labels []Label
 }
 
+// NewRootDomainName returns the root domain, whose only label is the root
+// label.
 func NewRootDomainName() DomainName {
 	return DomainName{labels: []Label{NewRootLabel()}}
 }
 
+// NewDomainNameFromString parses a domain name in presentation form
+// (RFC 1035 Section 5): labels separated by '.', in which '.' and '\' may be
+// backslash-escaped and a backslash followed by three digits denotes the
+// corresponding octet. The empty string and "." both denote the root domain.
+// An empty label, a label of 64 or more octets, or a name whose wire-format
+// length exceeds 255 octets is an error.
 func NewDomainNameFromString(name string) (DomainName, error) {
 	if name == "" || name == "." {
 		return NewRootDomainName(), nil
@@ -173,6 +216,10 @@ func NewDomainNameFromString(name string) (DomainName, error) {
 	return d, nil
 }
 
+// NewDomainNameFromLabel constructs a DomainName from a slice of Labels
+// given from the most specific to the least specific, terminated by the root
+// label. The labels are not otherwise validated; the caller is responsible
+// for providing a valid sequence of labels.
 func NewDomainNameFromLabel(ls []Label) (DomainName, error) {
 	return DomainName{labels: ls}, nil
 }
@@ -203,6 +250,10 @@ func NewDomainNameFromWireFormat(w *WireFormat, index uint32) (DomainName, error
 	return d, nil
 }
 
+// String returns the presentation form of the domain name: the labels
+// joined by '.', with the trailing root label printing nothing (so the
+// root domain prints as the empty string and the singleton "com" as
+// "com.").
 func (d DomainName) String() string {
 	labels := []string{}
 	for _, l := range d.labels {
@@ -211,11 +262,20 @@ func (d DomainName) String() string {
 	return strings.Join(labels, ".")
 }
 
+// AppendLabel adds a label to the domain name. The receiver must be
+// terminated by the root label. The new label is inserted just before the
+// root label, replacing it, and a fresh root label is appended after it, so
+// that the result remains root-terminated. Labels therefore accumulate from
+// most specific to least specific: appending "www", then "example", then
+// "com" to the root domain yields "www.example.com.".
 func (d *DomainName) AppendLabel(l Label) {
 	d.labels[len(d.labels)-1] = l
 	d.labels = append(d.labels, NewRootLabel())
 }
 
+// CanonicalDomainName returns a copy of the domain name with each label in
+// canonical (lowercase) form, in the sense of RFC 4034 Section 6.2,
+// suitable for canonical wire-format encoding.
 func (d *DomainName) CanonicalDomainName() DomainName {
 	labels := []Label{}
 	for _, l := range d.labels {
@@ -225,6 +285,9 @@ func (d *DomainName) CanonicalDomainName() DomainName {
 	return canonical
 }
 
+// Equal reports whether lhs and rhs are the same domain name: they have the
+// same number of labels and each pair of corresponding labels is Equal
+// (hence case insensitive).
 func (lhs DomainName) Equal(rhs DomainName) bool {
 	if len(lhs.labels) != len(rhs.labels) {
 		return false
