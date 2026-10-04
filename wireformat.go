@@ -118,6 +118,43 @@ func (w *WireFormat) AppendDomainname(name Domainname, db *NameCompressionDB) ui
 	return size
 }
 
+// AppendDomainName appends a DomainName and uses compression for suffixes
+// which have already been written to the message.  The offset in a DNS
+// compression pointer has only fourteen bits, so compression is disabled
+// once the current message offset no longer fits in that field.
+func (w *WireFormat) AppendDomainName(name DomainName, db *NameCompressionDB) uint32 {
+	if w == nil {
+		return 0
+	}
+
+	var size uint32
+	for i, label := range name.labels {
+		if len(label.data) == 0 {
+			// The root label terminates the name.
+			break
+		}
+
+		if db != nil {
+			suffix, _ := NewDomainNameFromLabel(name.labels[i:])
+
+			if pointer, found := db.FindDomainName(suffix); found &&
+				uint32(pointer) < w.Size() && uint32(pointer) <= domainnameCompressionMaxOffset {
+				size += w.AppendUInt16(0xc000 | pointer)
+				return size
+			}
+			if w.Size() <= domainnameCompressionMaxOffset {
+				db.AddDomainName(suffix, uint16(w.Size()))
+			}
+		}
+
+		size += w.AppendUInt8(uint8(label.Size()))
+		size += w.AppendBytes(label.data)
+	}
+
+	size += w.AppendUInt8(0)
+	return size
+}
+
 func (w WireFormat) GetUInt8(i uint32) (uint8, error) {
 	if i >= uint32(len(w)) {
 		return 0, fmt.Errorf("out of bound access")

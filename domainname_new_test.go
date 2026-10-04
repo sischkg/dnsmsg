@@ -1002,6 +1002,155 @@ func TestDomainNameParentDomainNames(t *testing.T) {
 	}
 }
 
+func TestDomainNameDBKey(t *testing.T) {
+	t.Run("root domain", func(t *testing.T) {
+		got := NewRootDomainName().DBKey()
+		want := [DOMAINNAME_MAX_LENGTH]byte{}
+		if got != want {
+			t.Fatalf("root DBKey() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("single label", func(t *testing.T) {
+		com, err := NewDomainNameFromString("com.")
+		if err != nil {
+			t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+		}
+		got := com.DBKey()
+		want := [DOMAINNAME_MAX_LENGTH]byte{}
+		want[0] = 3
+		copy(want[1:4], []byte("com"))
+		// want[4] is the terminating zero octet.
+		if got != want {
+			t.Fatalf("DBKey() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("three labels", func(t *testing.T) {
+		name, err := NewDomainNameFromString("www.example.com.")
+		if err != nil {
+			t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+		}
+		got := name.DBKey()
+		want := [DOMAINNAME_MAX_LENGTH]byte{}
+		want[0] = 3
+		copy(want[1:4], []byte("www"))
+		want[4] = 7
+		copy(want[5:12], []byte("example"))
+		want[12] = 3
+		copy(want[13:16], []byte("com"))
+		// want[16] is the terminating zero octet.
+		if got != want {
+			t.Fatalf("DBKey() = %v, want %v", got, want)
+		}
+	})
+
+	t.Run("case insensitive", func(t *testing.T) {
+		upper, err := NewDomainNameFromString("WWW.EXAMPLE.COM.")
+		if err != nil {
+			t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+		}
+		lower, err := NewDomainNameFromString("www.example.com.")
+		if err != nil {
+			t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+		}
+		// RFC 4343 Section 2: names compare equal regardless of case.
+		if upper.DBKey() != lower.DBKey() {
+			t.Errorf("DBKey() is not case insensitive: %v, want %v", upper.DBKey(), lower.DBKey())
+		}
+	})
+
+	t.Run("same key as legacy Domainname", func(t *testing.T) {
+		dn, err := NewDomainNameFromString("www.example.com.")
+		if err != nil {
+			t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+		}
+		legacy := Domainname{{'w', 'w', 'w'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+		if dn.DBKey() != legacy.DBKey() {
+			t.Errorf("DBKey() = %v, want legacy %v", dn.DBKey(), legacy.DBKey())
+		}
+	})
+}
+
+func TestNameCompressionDBDomainName(t *testing.T) {
+	db := NewNameCompressionDB()
+	name, err := NewDomainNameFromString("www.example.com.")
+	if err != nil {
+		t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+	}
+
+	// Not found initially.
+	if _, found := db.FindDomainName(name); found {
+		t.Error("NameCompressionDB.FindDomainName() should return false for new name")
+	}
+
+	// Add and find.
+	db.AddDomainName(name, 10)
+	pointer, found := db.FindDomainName(name)
+	if !found {
+		t.Error("NameCompressionDB.FindDomainName() should return true after AddDomainName")
+	}
+	if pointer != 10 {
+		t.Errorf("NameCompressionDB.FindDomainName() = %v, want %v", pointer, 10)
+	}
+
+	// FindDomainName is case insensitive, so a name added in another case
+	// still matches.
+	mixed, err := NewDomainNameFromString("WwW.ExAMPLE.Com")
+	if err != nil {
+		t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+	}
+	if pointer, found = db.FindDomainName(mixed); !found {
+		t.Error("NameCompressionDB.FindDomainName() should find name under different case")
+	} else if pointer != 10 {
+		t.Errorf("NameCompressionDB.FindDomainName() = %v, want %v", pointer, 10)
+	}
+}
+
+func TestNameCompressionDBDomainName_CrossType(t *testing.T) {
+	// The keys of DomainName and Domainname are identical, so names added
+	// through one type are visible through the other.
+	db := NewNameCompressionDB()
+
+	legacy := Domainname{{'W', 'w', 'W'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	db.Add(legacy, 10)
+
+	name, err := NewDomainNameFromString("www.example.com.")
+	if err != nil {
+		t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+	}
+	if pointer, found := db.FindDomainName(name); !found {
+		t.Error("FindDomainName() should find the name added through Domainname")
+	} else if pointer != 10 {
+		t.Errorf("FindDomainName() = %v, want %v", pointer, 10)
+	}
+	if pointer, found := db.Find(legacy); !found {
+		t.Error("Find() should still find the name")
+	} else if pointer != 10 {
+		t.Errorf("Find() = %v, want %v", pointer, 10)
+	}
+
+	db.AddDomainName(name, 20)
+	if pointer, found := db.Find(legacy); !found {
+		t.Error("Find() should find the name added through DomainName")
+	} else if pointer != 20 {
+		t.Errorf("Find() = %v, want %v", pointer, 20)
+	}
+}
+
+func TestNameCompressionDBDomainName_Nil(t *testing.T) {
+	var db *NameCompressionDB
+	name, err := NewDomainNameFromString("com.")
+	if err != nil {
+		t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
+	}
+
+	if _, found := db.FindDomainName(name); found {
+		t.Error("FindDomainName() on nil NameCompressionDB should return false")
+	}
+	db.AddDomainName(name, 1) // must not panic
+}
+
 func TestDomainNameStringRoundtrip(t *testing.T) {
 	tests := []struct {
 		name  string

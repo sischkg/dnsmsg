@@ -320,7 +320,30 @@ func (d DomainName) ParentDomainNames() []DomainName {
 	return parents
 }
 
-type NameCompressDB struct {
+// DBKey returns a fixed-size key that identifies d in the map maintained by
+// NameCompressionDB.  The key is the wire-format encoding of the name
+// (RFC 1035 Section 4.1.4) with ASCII letters in canonical lower-case form
+// (RFC 4034 Section 6.2), so that names compare equal regardless of case,
+// as in RFC 4343 Section 2.  A DomainName and a Domainname for the same
+// domain yield the same key.  Names whose encoding does not fit in
+// DOMAINNAME_MAX_LENGTH octets yield the truncated encoding.
+func (d DomainName) DBKey() [DOMAINNAME_MAX_LENGTH]byte {
+	var msg [DOMAINNAME_MAX_LENGTH]byte
+
+	i := 0
+	for _, label := range d.labels {
+		if len(label.data) == 0 || len(label.data) > domainnameMaxLabelLength || i+1+len(label.data) >= len(msg) {
+			break
+		}
+		msg[i] = byte(len(label.data))
+		i++
+		for _, c := range label.data {
+			msg[i] = asciiLower(c)
+			i++
+		}
+	}
+	msg[i] = 0
+	return msg
 }
 
 type Domainname [][]byte
@@ -706,6 +729,30 @@ func (db *NameCompressionDB) Find(name Domainname) (pointer uint16, found bool) 
 }
 
 func (db *NameCompressionDB) Add(name Domainname, p uint16) {
+	if db == nil {
+		return
+	}
+	if db.nameToPointer == nil {
+		db.nameToPointer = make(map[[DOMAINNAME_MAX_LENGTH]byte]uint16)
+	}
+	db.nameToPointer[name.DBKey()] = p
+}
+
+// FindDomainName is the DomainName counterpart of Find: it reports whether
+// the name has already been written to the message and returns the offset
+// at which it begins.  Lookups are case insensitive, as in RFC 4343 Section 2.
+func (db *NameCompressionDB) FindDomainName(name DomainName) (pointer uint16, found bool) {
+	if db == nil {
+		return 0, false
+	}
+	pointer, found = db.nameToPointer[name.DBKey()]
+	return
+}
+
+// AddDomainName is the DomainName counterpart of Add: it records the offset
+// at which the name has been written to the message, so that later
+// occurrences of the same name can be written as a compression pointer.
+func (db *NameCompressionDB) AddDomainName(name DomainName, p uint16) {
 	if db == nil {
 		return
 	}
