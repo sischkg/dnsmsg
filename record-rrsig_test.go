@@ -64,7 +64,9 @@ func TestParseRecordRRSIG(t *testing.T) {
 				return buildRRSIGWire(t, 6, 5, 1, 600, 1700000000, 1690000000, 256, root, sig)
 			}(),
 			begin:   0,
-			want:    NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, Domainname{}, []byte{0xDE, 0xAD, 0xBE, 0xEF}),
+			// Wire-format parsing represents the root domain as a nil
+			// Domainname (see TestNewCanonicalDomainnameFromBytes).
+			want:    NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, Domainname(nil), []byte{0xDE, 0xAD, 0xBE, 0xEF}),
 			wantPos: 23, // 18 + 1 (root) + 4
 			wantErr: false,
 		},
@@ -132,7 +134,9 @@ func TestParseRecordRRSIG(t *testing.T) {
 }
 
 func TestNewRecordRRSIGFromString(t *testing.T) {
-	signersName := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	// NewDomainname retains a trailing empty terminal label for presentation
+	// names (see TestNewDomainname), so the expected name carries it.
+	signersName := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}, {}}
 	signature := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x01, 0x02}
 
 	tests := []struct {

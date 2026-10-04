@@ -58,6 +58,8 @@ func (t ResourceType) String() string {
 		return "A"
 	case TYPE_NS:
 		return "NS"
+	case TYPE_SOA:
+		return "SOA"
 	case TYPE_MX:
 		return "MX"
 	case TYPE_AAAA:
@@ -253,8 +255,12 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 		rr.RData, _, err = ParseRecordA(w, p)
 	case TYPE_NS:
 		rr.RData, _, err = ParseRecordNS(w, p)
+	case TYPE_MX:
+		rr.RData, _, err = ParseRecordMX(w, p)
 	case TYPE_SOA:
 		rr.RData, _, err = ParseRecordSOA(w, p)
+	case TYPE_AAAA:
+		rr.RData, _, err = ParseRecordAAAA(w, p)
 	case TYPE_DS:
 		rr.RData, _, err = ParseRecordDS(w, p)
 	case TYPE_RRSIG:
@@ -461,8 +467,9 @@ func SendQuery(query Message, target string, port uint16, transport string) (rep
 	var q, r WireFormat
 	q.WriteWireFormat(query)
 
+	endpoint := net.JoinHostPort(target, strconv.Itoa(int(port)))
 	if transport == DNSoverUDP {
-		udp, e := net.Dial("udp", fmt.Sprintf("%s:%d", target, port))
+		udp, e := net.Dial("udp", endpoint)
 		if e != nil {
 			err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
 			return
@@ -480,7 +487,7 @@ func SendQuery(query Message, target string, port uint16, transport string) (rep
 		}
 		r = WireFormat(buf)
 	} else if transport == DNSoverTCP {
-		tcp, e := net.Dial("tcp", fmt.Sprintf("%s:%d", target, port))
+		tcp, e := net.Dial("tcp", endpoint)
 		if e != nil {
 			err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
 			return
