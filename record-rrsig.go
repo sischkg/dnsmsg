@@ -15,7 +15,7 @@ type RecordRRSIG struct {
 	Expiration  uint32
 	Inception   uint32
 	KeyTag      uint16
-	SignersName Domainname
+	SignersName DomainName
 	Signature   []byte
 }
 
@@ -52,7 +52,7 @@ func (r RecordRRSIG) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint
 	size += w.AppendUInt32(r.Expiration)
 	size += w.AppendUInt32(r.Inception)
 	size += w.AppendUInt16(r.KeyTag)
-	size += w.AppendDomainname(r.SignersName, db)
+	size += w.AppendDomainName(r.SignersName, db)
 	size += w.AppendBytes(r.Signature)
 	return size
 }
@@ -66,14 +66,14 @@ func (r RecordRRSIG) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 	size += w.AppendUInt32(r.Expiration)
 	size += w.AppendUInt32(r.Inception)
 	size += w.AppendUInt16(r.KeyTag)
-	size += w.AppendCanonicalDomainname(r.SignersName)
+	size += w.AppendCanonicalDomainName(r.SignersName)
 	size += w.AppendBytes(r.Signature)
 	return size
 }
 
 // NewRecordRRSIG creates a new RecordRRSIG from structured values
 func NewRecordRRSIG(typeCovered uint16, algorithm uint8, labels uint8, origTTL uint32,
-	expiration uint32, inception uint32, keyTag uint16, signersName Domainname, signature []byte) RecordRRSIG {
+	expiration uint32, inception uint32, keyTag uint16, signersName DomainName, signature []byte) RecordRRSIG {
 	return RecordRRSIG{
 		TypeCovered: typeCovered,
 		Algorithm:   algorithm,
@@ -141,7 +141,7 @@ func NewRecordRRSIGFromString(s string) (RecordRRSIG, error) {
 		return RecordRRSIG{}, fmt.Errorf(`invalid key-tag "%s"`, matched[7])
 	}
 
-	signersName, err := NewDomainname(matched[8])
+	signersName, err := NewDomainNameFromString(matched[8])
 	if err != nil {
 		return RecordRRSIG{}, fmt.Errorf(`invalid signers-name "%s"`, matched[8])
 	}
@@ -217,7 +217,7 @@ func ParseRecordRRSIG(w WireFormat, begin uint32) (r RecordRRSIG, end uint32, er
 	}
 	p += 2
 
-	signersName, p, err := NewDomainnameFromWireFormat(w, p)
+	signersName, p, err := NewDomainNameFromCompressedWireFormat(&w, p)
 	if err != nil {
 		err = fmt.Errorf("cannot parse signers-name: %w", err)
 		return

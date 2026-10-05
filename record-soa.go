@@ -7,8 +7,8 @@ import (
 )
 
 type RecordSOA struct {
-	mname   Domainname
-	rname   Domainname
+	mname   DomainName
+	rname   DomainName
 	serial  uint32
 	refresh uint32
 	retry   uint32
@@ -33,15 +33,13 @@ func (lhs RecordSOA) Equal(rhs RecordSOA) bool {
 
 func (a RecordSOA) Size(w WireFormat, db *NameCompressionDB) uint32 {
 	// Compute the actual RDATA size: two domain names + 5 × 4 bytes for timers
-	mnameSize, _ := domainnameWireSize(a.mname)
-	rnameSize, _ := domainnameWireSize(a.rname)
-	return mnameSize + rnameSize + 5*4
+	return a.mname.Size() + a.rname.Size() + 5*4
 }
 
 func (soa RecordSOA) CanonicalWireFormat() []byte {
 	var w WireFormat
-	w.AppendCanonicalDomainname(soa.mname)
-	w.AppendCanonicalDomainname(soa.rname)
+	w.AppendCanonicalDomainName(soa.mname)
+	w.AppendCanonicalDomainName(soa.rname)
 	w.AppendUInt32(soa.serial)
 	w.AppendUInt32(soa.refresh)
 	w.AppendUInt32(soa.retry)
@@ -52,8 +50,8 @@ func (soa RecordSOA) CanonicalWireFormat() []byte {
 
 func (soa RecordSOA) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
-	size += w.AppendDomainname(soa.mname, db)
-	size += w.AppendDomainname(soa.rname, db)
+	size += w.AppendDomainName(soa.mname, db)
+	size += w.AppendDomainName(soa.rname, db)
 	size += w.AppendUInt32(soa.serial)
 	size += w.AppendUInt32(soa.refresh)
 	size += w.AppendUInt32(soa.retry)
@@ -65,8 +63,8 @@ func (soa RecordSOA) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint
 
 func (soa RecordSOA) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 	var size uint32 = 0
-	size += w.AppendCanonicalDomainname(soa.mname)
-	size += w.AppendCanonicalDomainname(soa.rname)
+	size += w.AppendCanonicalDomainName(soa.mname)
+	size += w.AppendCanonicalDomainName(soa.rname)
 	size += w.AppendUInt32(soa.serial)
 	size += w.AppendUInt32(soa.refresh)
 	size += w.AppendUInt32(soa.retry)
@@ -86,12 +84,12 @@ func NewRecordSOAFromString(s string) (soa RecordSOA, err error) {
 		err = fmt.Errorf(`cannot parse SOA record "%s"`, s)
 		return
 	}
-	mname, err := NewDomainname(matched[pattern.SubexpIndex("mname")])
+	mname, err := NewDomainNameFromString(matched[pattern.SubexpIndex("mname")])
 	if err != nil {
 		err = fmt.Errorf("cannot parse mname of SOA: %v", err)
 		return
 	}
-	rname, err := NewDomainname(matched[pattern.SubexpIndex("rname")])
+	rname, err := NewDomainNameFromString(matched[pattern.SubexpIndex("rname")])
 	if err != nil {
 		err = fmt.Errorf("cannot parse rname of SOA: %v", err)
 		return
@@ -107,7 +105,7 @@ func NewRecordSOAFromString(s string) (soa RecordSOA, err error) {
 	return
 }
 
-func NewRecordSOA(mname, rname Domainname, serial, refresh, retry, expire, minimum uint32) (soa RecordSOA) {
+func NewRecordSOA(mname, rname DomainName, serial, refresh, retry, expire, minimum uint32) (soa RecordSOA) {
 	soa.mname = mname
 	soa.rname = rname
 	soa.serial = serial
@@ -120,11 +118,11 @@ func NewRecordSOA(mname, rname Domainname, serial, refresh, retry, expire, minim
 
 func ParseRecordSOA(w WireFormat, begin uint32) (soa RecordSOA, end uint32, err error) {
 	var p uint32
-	soa.mname, p, err = NewDomainnameFromWireFormat(w, begin)
+	soa.mname, p, err = NewDomainNameFromCompressedWireFormat(&w, begin)
 	if err != nil {
 		return
 	}
-	soa.rname, p, err = NewDomainnameFromWireFormat(w, p)
+	soa.rname, p, err = NewDomainNameFromCompressedWireFormat(&w, p)
 	if err != nil {
 		return
 	}

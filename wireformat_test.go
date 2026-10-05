@@ -323,6 +323,79 @@ func TestWireFormatAppendDomainName(t *testing.T) {
 	}
 }
 
+func TestWireFormatAppendCanonicalDomainName(t *testing.T) {
+	tests := []struct {
+		name     string
+		domain   string
+		wantWire []byte
+		wantSize uint32
+	}{
+		{
+			name:     "nil WireFormat",
+			domain:   "a.",
+			wantWire: nil,
+			wantSize: 0,
+		},
+		{
+			name:     "root domain",
+			domain:   ".",
+			wantWire: []byte{0},
+			wantSize: 1,
+		},
+		{
+			name:     "single label",
+			domain:   "com.",
+			wantWire: []byte{3, 'c', 'o', 'm', 0},
+			wantSize: 5,
+		},
+		{
+			name:     "upper and mixed case lowered",
+			domain:   "WWW.ExAmPlE.Com.",
+			wantWire: []byte{3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0},
+			wantSize: 17,
+		},
+		{
+			name:     "append to existing wire format",
+			domain:   "a.",
+			wantWire: []byte{0xff, 1, 'a', 0},
+			wantSize: 3,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			name, err := NewDomainNameFromString(tt.domain)
+			if err != nil {
+				t.Fatalf("NewDomainNameFromString(%q): %v", tt.domain, err)
+			}
+
+			var w *WireFormat
+			if tt.name == "nil WireFormat" {
+				size := w.AppendCanonicalDomainName(name)
+				if size != tt.wantSize {
+					t.Errorf("AppendCanonicalDomainName() size = %v, want %v", size, tt.wantSize)
+				}
+				return
+			}
+
+			if tt.name == "append to existing wire format" {
+				w = new(WireFormat)
+				*w = []byte{0xff}
+			} else {
+				w = new(WireFormat)
+			}
+
+			size := w.AppendCanonicalDomainName(name)
+			if size != tt.wantSize {
+				t.Errorf("AppendCanonicalDomainName() size = %v, want %v", size, tt.wantSize)
+			}
+			if !bytes.Equal(*w, tt.wantWire) {
+				t.Errorf("AppendCanonicalDomainName() wire = %v, want %v", *w, tt.wantWire)
+			}
+		})
+	}
+}
+
 func TestWireFormatAppendDomainName_Compression(t *testing.T) {
 	// Compression DB を使用して、2回目以降の同じサフィックスが圧縮ポインタで書き込まれることを確認
 	db := NewNameCompressionDB()

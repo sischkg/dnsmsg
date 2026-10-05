@@ -6,14 +6,6 @@ import (
 	"testing"
 )
 
-func mustDomainname(s string) Domainname {
-	d, err := NewDomainname(s)
-	if err != nil {
-		panic(err)
-	}
-	return d
-}
-
 func TestParseRecordMX(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -27,7 +19,7 @@ func TestParseRecordMX(t *testing.T) {
 			name:    "valid MX record",
 			input:   []byte{0, 10, 4, 'm', 'a', 'i', 'l', 2, 'g', 'o', 0}, // Pref 10, "mail.go."
 			begin:   0,
-			want:    NewRecordMX(10, mustDomainname("mail.go")),
+			want:    NewRecordMX(10, testDomainName(t, "mail.go")),
 			wantEnd: 11,
 			wantErr: false,
 		},
@@ -76,7 +68,7 @@ func TestNewRecordMXFromString(t *testing.T) {
 		{
 			name:    "valid MX string",
 			input:   "10 mail.example.com",
-			want:    NewRecordMX(10, mustDomainname("mail.example.com")),
+			want:    NewRecordMX(10, testDomainName(t, "mail.example.com")),
 			wantErr: false,
 		},
 		{
@@ -114,7 +106,7 @@ func TestNewRecordMXFromString(t *testing.T) {
 }
 
 func TestRecordMX_String(t *testing.T) {
-	d, _ := NewDomainname("mail.example.com")
+	d := testDomainName(t, "mail.example.com")
 	r := NewRecordMX(10, d)
 	want := "10 mail.example.com."
 	if got := r.String(); got != want {
@@ -123,7 +115,7 @@ func TestRecordMX_String(t *testing.T) {
 }
 
 func TestRecordMX_AppendWireFormat(t *testing.T) {
-	d, _ := NewDomainname("mail.example.com")
+	d := testDomainName(t, "mail.example.com")
 	r := NewRecordMX(10, d)
 	w := new(WireFormat)
 	db := NewNameCompressionDB()

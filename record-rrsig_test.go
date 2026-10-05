@@ -7,7 +7,7 @@ import (
 )
 
 // buildRRSIGWire builds the wire format for an RRSIG RDATA with given fields.
-func buildRRSIGWire(t *testing.T, typeCovered uint16, algorithm, labels uint8, origTTL, expiration, inception uint32, keyTag uint16, signersName Domainname, signature []byte) WireFormat {
+func buildRRSIGWire(t *testing.T, typeCovered uint16, algorithm, labels uint8, origTTL, expiration, inception uint32, keyTag uint16, signersName DomainName, signature []byte) WireFormat {
 	t.Helper()
 	var w WireFormat
 	w.AppendUInt16(typeCovered)
@@ -17,13 +17,13 @@ func buildRRSIGWire(t *testing.T, typeCovered uint16, algorithm, labels uint8, o
 	w.AppendUInt32(expiration)
 	w.AppendUInt32(inception)
 	w.AppendUInt16(keyTag)
-	w.AppendDomainname(signersName, nil)
+	w.AppendDomainName(signersName, nil)
 	w.AppendBytes(signature)
 	return w
 }
 
 func TestParseRecordRRSIG(t *testing.T) {
-	signersName := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	signersName := testDomainName(t, "ns1.example.com")
 	signature := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x01, 0x02}
 
 	tests := []struct {
@@ -59,14 +59,14 @@ func TestParseRecordRRSIG(t *testing.T) {
 		{
 			name: "RRSIG with root signers name",
 			input: func() []byte {
-				root := Domainname{}
+				root := NewRootDomainName()
 				sig := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 				return buildRRSIGWire(t, 6, 5, 1, 600, 1700000000, 1690000000, 256, root, sig)
 			}(),
 			begin:   0,
-			// Wire-format parsing represents the root domain as a nil
-			// Domainname (see TestNewCanonicalDomainnameFromBytes).
-			want:    NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, Domainname(nil), []byte{0xDE, 0xAD, 0xBE, 0xEF}),
+			// Wire-format parsing represents the root domain as a single
+			// root label (see TestNewCanonicalDomainnameFromBytes).
+			want:    NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, NewRootDomainName(), []byte{0xDE, 0xAD, 0xBE, 0xEF}),
 			wantPos: 23, // 18 + 1 (root) + 4
 			wantErr: false,
 		},
@@ -134,9 +134,10 @@ func TestParseRecordRRSIG(t *testing.T) {
 }
 
 func TestNewRecordRRSIGFromString(t *testing.T) {
-	// NewDomainname retains a trailing empty terminal label for presentation
-	// names (see TestNewDomainname), so the expected name carries it.
-	signersName := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}, {}}
+	// NewDomainNameFromString retains a trailing root label for
+	// presentation names (see TestNewDomainName), so the expected name
+	// carries it.
+	signersName := testDomainName(t, "ns1.example.com")
 	signature := []byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x01, 0x02}
 
 	tests := []struct {
@@ -160,7 +161,7 @@ func TestNewRecordRRSIGFromString(t *testing.T) {
 		{
 			name:    "valid RRSIG with root signers name",
 			input:   "6 5 1 600 1700000000 1690000000 256 . 3q2+7w",
-			want:    NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, Domainname{}, []byte{0xDE, 0xAD, 0xBE, 0xEF}),
+			want:    NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, NewRootDomainName(), []byte{0xDE, 0xAD, 0xBE, 0xEF}),
 			wantErr: false,
 		},
 		{
@@ -240,7 +241,7 @@ func TestNewRecordRRSIGFromString(t *testing.T) {
 }
 
 func TestRecordRRSIGString(t *testing.T) {
-	signersName := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	signersName := testDomainName(t, "ns1.example.com")
 
 	tests := []struct {
 		name  string
@@ -259,8 +260,8 @@ func TestRecordRRSIGString(t *testing.T) {
 		},
 		{
 			name:  "RRSIG with root signers name",
-			input: NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, Domainname{}, []byte{0xDE, 0xAD, 0xBE, 0xEF}),
-			want:  "SOA 5 1 600 1700000000 1690000000 256 . 3q2+7w",
+			input: NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, NewRootDomainName(), []byte{0xDE, 0xAD, 0xBE, 0xEF}),
+			want:  "SOA 5 1 600 1700000000 1690000000 256  3q2+7w",
 		},
 	}
 
@@ -275,14 +276,14 @@ func TestRecordRRSIGString(t *testing.T) {
 }
 
 func TestRecordRRSIGType(t *testing.T) {
-	rrsig := NewRecordRRSIG(1, 5, 3, 3600, 1700000000, 1690000000, 12345, Domainname{}, []byte{0xAA})
+	rrsig := NewRecordRRSIG(1, 5, 3, 3600, 1700000000, 1690000000, 12345, NewRootDomainName(), []byte{0xAA})
 	if rrsig.Type() != TYPE_RRSIG {
 		t.Errorf("RecordRRSIG.Type() = %v, want %v", rrsig.Type(), TYPE_RRSIG)
 	}
 }
 
 func TestRecordRRSIGCanonicalWireFormat(t *testing.T) {
-	signersName := Domainname{{'N', 'S', '1'}, {'E', 'X', 'A', 'M', 'P', 'L', 'E'}, {'C', 'O', 'M'}}
+	signersName := testDomainName(t, "NS1.EXAMPLE.COM")
 	rrsig := NewRecordRRSIG(
 		1, 5, 3, 3600, 1700000000, 1690000000, 12345,
 		signersName,
@@ -314,7 +315,7 @@ func TestRecordRRSIGCanonicalWireFormat(t *testing.T) {
 }
 
 func TestRecordRRSIGRoundTrip(t *testing.T) {
-	signersName := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	signersName := testDomainName(t, "ns1.example.com")
 	original := NewRecordRRSIG(
 		46, 8, 4, 86400, 1710000000, 1700000000, 9876,
 		signersName,
@@ -338,7 +339,7 @@ func TestRecordRRSIGRoundTrip(t *testing.T) {
 }
 
 func TestRecordRRSIGAppendWireFormat(t *testing.T) {
-	signersName := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	signersName := testDomainName(t, "ns1.example.com")
 	rrsig := NewRecordRRSIG(
 		1, 5, 3, 3600, 1700000000, 1690000000, 12345,
 		signersName,
@@ -382,7 +383,7 @@ func TestRecordRRSIGFromStringRoundTrip(t *testing.T) {
 }
 
 func TestNewRecordRRSIG(t *testing.T) {
-	signersName := Domainname{{'n', 's'}, {'d', 'n', 's'}}
+	signersName := testDomainName(t, "ns.dns")
 	rrsig := NewRecordRRSIG(
 		46, 13, 4, 86400, 1710000000, 1700000000, 1234,
 		signersName,
@@ -417,7 +418,7 @@ func TestNewRecordRRSIG(t *testing.T) {
 
 // Test that using compression DB results in shorter wire format for the signers name
 func TestRecordRRSIGCompression(t *testing.T) {
-	signersName := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	signersName := testDomainName(t, "ns1.example.com")
 	rrsig1 := NewRecordRRSIG(
 		1, 5, 3, 3600, 1700000000, 1690000000, 12345,
 		signersName,

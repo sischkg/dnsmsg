@@ -1,7 +1,7 @@
 package dnsmsg
 
 type RecordNS struct {
-	nsname Domainname
+	nsname DomainName
 }
 
 func (a RecordNS) Type() ResourceType {
@@ -21,28 +21,28 @@ func (ns RecordNS) CanonicalWireFormat() []byte {
 }
 
 func (ns RecordNS) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 {
-	return w.AppendDomainname(ns.nsname, db)
+	return w.AppendDomainName(ns.nsname, db)
 }
 
 func (ns RecordNS) AppendCanonicalWireFormat(w *WireFormat) uint32 {
-	return w.AppendCanonicalDomainname(ns.nsname)
+	return w.AppendCanonicalDomainName(ns.nsname)
 }
 
 func NewRecordNSFromString(n string) (ns RecordNS, err error) {
-	name, err := NewDomainname(n)
+	name, err := NewDomainNameFromString(n)
 	if err != nil {
 		return
 	}
 	return NewRecordNS(name), nil
 }
 
-func NewRecordNS(n Domainname) (ns RecordNS) {
+func NewRecordNS(n DomainName) (ns RecordNS) {
 	ns.nsname = n
 	return
 }
 
 func ParseRecordNS(w WireFormat, begin uint32) (ns RecordNS, end uint32, err error) {
-	name, end, err := NewDomainnameFromWireFormat(w, begin)
+	name, end, err := NewDomainNameFromCompressedWireFormat(&w, begin)
 	if err != nil {
 		return
 	}

@@ -145,7 +145,7 @@ func NewClass(s string) (ResourceClass, error) {
 }
 
 type QuestionSectionEntry struct {
-	QName Domainname
+	QName DomainName
 	Class ResourceClass
 	Type  ResourceType
 }
@@ -156,7 +156,7 @@ func (q QuestionSectionEntry) String() string {
 
 func AppendQuestionSectionEntry(w *WireFormat, q QuestionSectionEntry, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
-	size += w.AppendDomainname(q.QName, db)
+	size += w.AppendDomainName(q.QName, db)
 	size += w.AppendUInt16(uint16(q.Type))
 	size += w.AppendUInt16(uint16(q.Class))
 	return size
@@ -164,7 +164,7 @@ func AppendQuestionSectionEntry(w *WireFormat, q QuestionSectionEntry, db *NameC
 
 func ParseQuestionSectionEntry(w WireFormat, begin uint32) (q QuestionSectionEntry, end uint32, err error) {
 	var p uint32
-	q.QName, p, err = NewDomainnameFromWireFormat(w, begin)
+	q.QName, p, err = NewDomainNameFromCompressedWireFormat(&w, begin)
 	if err != nil {
 		err = fmt.Errorf("cannot parse QNAME(%s)", err)
 		return
@@ -199,7 +199,7 @@ type RDATA interface {
 }
 
 type ResourceRecord struct {
-	Name  Domainname
+	Name  DomainName
 	Class ResourceClass
 	Type  ResourceType
 	TTL   uint32
@@ -214,7 +214,7 @@ func (rr ResourceRecord) String() string {
 
 func AppendResourceRecord(w *WireFormat, rr ResourceRecord, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
-	size += w.AppendDomainname(rr.Name, db)
+	size += w.AppendDomainName(rr.Name, db)
 	size += w.AppendUInt16(uint16(rr.Type))
 	size += w.AppendUInt16(uint16(rr.Class))
 	size += w.AppendUInt32(rr.TTL)
@@ -228,7 +228,7 @@ func AppendResourceRecord(w *WireFormat, rr ResourceRecord, db *NameCompressionD
 
 func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uint32, err error) {
 	var p uint32
-	rr.Name, p, err = NewDomainnameFromWireFormat(w, begin)
+	rr.Name, p, err = NewDomainNameFromCompressedWireFormat(&w, begin)
 	if err != nil {
 		err = fmt.Errorf("cannot parse domainname(%s)", err)
 		return
@@ -323,7 +323,7 @@ func (msg Message) String() string {
 
 func (msg *Message) SetQuery(qname string, qclass ResourceClass, qtype ResourceType) error {
 	var q QuestionSectionEntry
-	d, err := NewDomainname(qname)
+	d, err := NewDomainNameFromString(qname)
 	if err != nil {
 		return fmt.Errorf("invalid QNAME %s: %v", qname, err)
 	}

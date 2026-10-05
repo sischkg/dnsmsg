@@ -155,6 +155,17 @@ func (w *WireFormat) AppendDomainName(name DomainName, db *NameCompressionDB) ui
 	return size
 }
 
+// AppendCanonicalDomainName appends the canonical wire representation of
+// name (RFC 4034 Section 6.2: lower-case, uncompressed, terminated by a
+// single zero octet) to w. This is the DomainName counterpart of
+// AppendCanonicalDomainname.
+func (w *WireFormat) AppendCanonicalDomainName(name DomainName) uint32 {
+	if w == nil {
+		return 0
+	}
+	return w.AppendBytes(name.CanonicalWireFormat())
+}
+
 func (w WireFormat) GetUInt8(i uint32) (uint8, error) {
 	if i >= uint32(len(w)) {
 		return 0, fmt.Errorf("out of bound access")

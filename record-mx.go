@@ -9,7 +9,7 @@ import (
 // RecordMX represents an MX (Mail Exchanger) record per RFC 1035 Section 3.3.1
 type RecordMX struct {
 	Preference uint16
-	Exchange   Domainname
+	Exchange   DomainName
 }
 
 func (r RecordMX) Type() ResourceType {
@@ -29,19 +29,19 @@ func (r RecordMX) CanonicalWireFormat() []byte {
 func (r RecordMX) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
 	size += w.AppendUInt16(r.Preference)
-	size += w.AppendDomainname(r.Exchange, db)
+	size += w.AppendDomainName(r.Exchange, db)
 	return size
 }
 
 func (r RecordMX) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 	var size uint32 = 0
 	size += w.AppendUInt16(r.Preference)
-	size += w.AppendCanonicalDomainname(r.Exchange)
+	size += w.AppendCanonicalDomainName(r.Exchange)
 	return size
 }
 
 // NewRecordMX creates a new RecordMX from structured values
-func NewRecordMX(preference uint16, exchange Domainname) RecordMX {
+func NewRecordMX(preference uint16, exchange DomainName) RecordMX {
 	return RecordMX{
 		Preference: preference,
 		Exchange:   exchange,
@@ -61,7 +61,7 @@ func NewRecordMXFromString(s string) (RecordMX, error) {
 		return RecordMX{}, fmt.Errorf(`invalid preference "%s"`, fields[0])
 	}
 
-	exchange, err := NewDomainname(fields[1])
+	exchange, err := NewDomainNameFromString(fields[1])
 	if err != nil {
 		return RecordMX{}, fmt.Errorf(`invalid exchange name "%s"`, fields[1])
 	}
@@ -80,7 +80,7 @@ func ParseRecordMX(w WireFormat, begin uint32) (r RecordMX, end uint32, err erro
 	}
 	p += 2
 
-	exchange, p, err := NewDomainnameFromWireFormat(w, p)
+	exchange, p, err := NewDomainNameFromCompressedWireFormat(&w, p)
 	if err != nil {
 		err = fmt.Errorf("cannot parse exchange: %w", err)
 		return

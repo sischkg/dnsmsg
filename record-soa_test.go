@@ -7,11 +7,11 @@ import (
 )
 
 // buildSOAWire builds the wire format for an SOA RDATA with given mname, rname and timers.
-func buildSOAWire(t *testing.T, mname, rname Domainname, serial, refresh, retry, expire, minimum uint32) WireFormat {
+func buildSOAWire(t *testing.T, mname, rname DomainName, serial, refresh, retry, expire, minimum uint32) WireFormat {
 	t.Helper()
 	var w WireFormat
-	w.AppendDomainname(mname, nil)
-	w.AppendDomainname(rname, nil)
+	w.AppendDomainName(mname, nil)
+	w.AppendDomainName(rname, nil)
 	w.AppendUInt32(serial)
 	w.AppendUInt32(refresh)
 	w.AppendUInt32(retry)
@@ -21,8 +21,8 @@ func buildSOAWire(t *testing.T, mname, rname Domainname, serial, refresh, retry,
 }
 
 func TestParseRecordSOA(t *testing.T) {
-	mname := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
-	rname := Domainname{{'a', 'd', 'm', 'i', 'n'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	mname := testDomainName(t, "ns1.example.com")
+	rname := testDomainName(t, "admin.example.com")
 
 	tests := []struct {
 		name    string
@@ -45,11 +45,11 @@ func TestParseRecordSOA(t *testing.T) {
 		{
 			name: "SOA with root domain names",
 			input: func() []byte {
-				root := Domainname{}
+				root := NewRootDomainName()
 				return buildSOAWire(t, root, root, 1, 0, 0, 0, 0)
 			}(),
 			begin:   0,
-			want:    NewRecordSOA(Domainname{}, Domainname{}, 1, 0, 0, 0, 0),
+			want:    NewRecordSOA(NewRootDomainName(), NewRootDomainName(), 1, 0, 0, 0, 0),
 			wantPos: 22,
 			wantErr: false,
 		},
@@ -121,8 +121,8 @@ func TestNewRecordSOAFromString(t *testing.T) {
 			name:  "valid SOA string",
 			input: "ns1.example.com. admin.example.com. 2023090101 3600 900 1209600 86400",
 			want: NewRecordSOA(
-				Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}, {}},
-				Domainname{{'a', 'd', 'm', 'i', 'n'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}, {}},
+				testDomainName(t, "ns1.example.com"),
+				testDomainName(t, "admin.example.com"),
 				2023090101, 3600, 900, 1209600, 86400,
 			),
 			wantErr: false,
@@ -131,8 +131,8 @@ func TestNewRecordSOAFromString(t *testing.T) {
 			name:  "single label names",
 			input: "localhost. admin. 1 0 0 0 0",
 			want: NewRecordSOA(
-				Domainname{{'l', 'o', 'c', 'a', 'l', 'h', 'o', 's', 't'}, {}},
-				Domainname{{'a', 'd', 'm', 'i', 'n'}, {}},
+				testDomainName(t, "localhost"),
+				testDomainName(t, "admin"),
 				1, 0, 0, 0, 0,
 			),
 			wantErr: false,
@@ -180,16 +180,16 @@ func TestRecordSOAString(t *testing.T) {
 		{
 			name: "standard SOA",
 			input: NewRecordSOA(
-				Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}},
-				Domainname{{'a', 'd', 'm', 'i', 'n'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}},
+				testDomainName(t, "ns1.example.com"),
+				testDomainName(t, "admin.example.com"),
 				2023090101, 3600, 900, 1209600, 86400,
 			),
 			want: "ns1.example.com. admin.example.com. 2023090101 3600 900 1209600 86400",
 		},
 		{
 			name:  "root domain",
-			input: NewRecordSOA(Domainname{{}}, Domainname{{}}, 1, 0, 0, 0, 0),
-			want:  ". . 1 0 0 0 0",
+			input: NewRecordSOA(NewRootDomainName(), NewRootDomainName(), 1, 0, 0, 0, 0),
+			want:  "  1 0 0 0 0",
 		},
 	}
 
@@ -204,7 +204,7 @@ func TestRecordSOAString(t *testing.T) {
 }
 
 func TestRecordSOAType(t *testing.T) {
-	soa := NewRecordSOA(Domainname{{}}, Domainname{{}}, 0, 0, 0, 0, 0)
+	soa := NewRecordSOA(NewRootDomainName(), NewRootDomainName(), 0, 0, 0, 0, 0)
 	if soa.Type() != TYPE_SOA {
 		t.Errorf("RecordSOA.Type() = %v, want %v", soa.Type(), TYPE_SOA)
 	}
@@ -218,8 +218,8 @@ func TestRecordSOACanonicalWireFormat(t *testing.T) {
 	var expire uint32 = 1209600
 	var minimum uint32 = 86400
 	soa := NewRecordSOA(
-		Domainname{{'N', 'S', '1'}, {'E', 'X', 'A', 'M', 'P', 'L', 'E'}, {'C', 'O', 'M'}},
-		Domainname{{'A', 'D', 'M', 'I', 'N'}, {'E', 'X', 'A', 'M', 'P', 'L', 'E'}, {'C', 'O', 'M'}},
+		testDomainName(t, "NS1.EXAMPLE.COM"),
+		testDomainName(t, "ADMIN.EXAMPLE.COM"),
 		serial, refresh, retry, expire, minimum,
 	)
 	want := []byte{
@@ -240,8 +240,8 @@ func TestRecordSOACanonicalWireFormat(t *testing.T) {
 
 func TestRecordSOARoundTrip(t *testing.T) {
 	original := NewRecordSOA(
-		Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}},
-		Domainname{{'a', 'd', 'm', 'i', 'n'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}},
+		testDomainName(t, "ns1.example.com"),
+		testDomainName(t, "admin.example.com"),
 		2023090101, 3600, 900, 1209600, 86400,
 	)
 
@@ -264,9 +264,9 @@ func TestRecordSOARoundTrip(t *testing.T) {
 func TestRecordSOAAppendWireFormat(t *testing.T) {
 	soa := NewRecordSOA(
 		//           1 + 3           1 + 7                                 1 + 3           1
-		Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}},
-		//           1 + 3           2 ( name compression )
-		Domainname{{'a', 'd', 'm', 'i', 'n'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}},
+		testDomainName(t, "ns1.example.com"),
+		//           1 + 5           2 ( name compression )
+		testDomainName(t, "admin.example.com"),
 		2023090101, 3600, 900, 1209600, 86400,
 	)
 	db := NewNameCompressionDB()
@@ -293,8 +293,8 @@ func TestRecordSOAAppendWireFormat(t *testing.T) {
 
 // Test that using compression db results in shorter wire format
 func TestRecordSOACompression(t *testing.T) {
-	mname := Domainname{{'n', 's', '1'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
-	rname := Domainname{{'a', 'd', 'm', 'i', 'n'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
+	mname := testDomainName(t, "ns1.example.com")
+	rname := testDomainName(t, "admin.example.com")
 	soa1 := NewRecordSOA(mname, rname, 2023090101, 3600, 900, 1209600, 86400)
 	soa2 := NewRecordSOA(mname, rname, 2023090102, 3600, 900, 1209600, 86400)
 

@@ -250,6 +250,33 @@ func NewDomainNameFromWireFormat(w *WireFormat, index uint32) (DomainName, error
 	return d, nil
 }
 
+// NewDomainNameFromCompressedWireFormat is the DomainName counterpart of
+// NewDomainnameFromWireFormat: it reads the domain name that begins at
+// index in the wire format, expanding name compression (RFC 1035 Section
+// 4.1.4).  The returned end is the offset immediately after the encoded
+// name, not after the pointer target; that distinction is important when
+// parsing fields which follow the name.
+func NewDomainNameFromCompressedWireFormat(w *WireFormat, index uint32) (DomainName, uint32, error) {
+	if w == nil {
+		return DomainName{}, 0, fmt.Errorf("wireFormat is nil")
+	}
+
+	name, end, err := parseDomainname(*w, index, true)
+	if err != nil {
+		return DomainName{}, end, err
+	}
+
+	d := NewRootDomainName()
+	for _, label := range name {
+		l, e := NewLabel(label)
+		if e != nil {
+			return DomainName{}, end, e
+		}
+		d.AppendLabel(l)
+	}
+	return d, end, nil
+}
+
 // String returns the presentation form of the domain name: the labels
 // joined by '.', with the trailing root label printing nothing (so the
 // root domain prints as the empty string and the singleton "com" as
@@ -283,6 +310,34 @@ func (d *DomainName) CanonicalDomainName() DomainName {
 	}
 	canonical, _ := NewDomainNameFromLabel(labels)
 	return canonical
+}
+
+// CanonicalWireFormat returns the canonical wire-format encoding (RFC 4034
+// Section 6.2) of the domain name: labels are written most specific first,
+// each as a length octet followed by its characters in canonical (lower-case)
+// form, and the name is terminated by a single zero octet. No compression
+// pointers are used.
+func (d DomainName) CanonicalWireFormat() []byte {
+	size := uint32(1) // terminating zero octet
+	for _, label := range d.labels {
+		if s := label.Size(); s > 0 {
+			size += 1 + s
+		}
+	}
+
+	msg := make([]byte, 0, size)
+	for _, label := range d.labels {
+		s := label.Size()
+		if s == 0 {
+			// The root label terminates the name.
+			continue
+		}
+		msg = append(msg, byte(s))
+		for _, c := range label.data {
+			msg = append(msg, asciiLower(c))
+		}
+	}
+	return append(msg, 0)
 }
 
 // Equal reports whether lhs and rhs are the same domain name: they have the
@@ -344,6 +399,33 @@ func (d DomainName) DBKey() [DOMAINNAME_MAX_LENGTH]byte {
 	}
 	msg[i] = 0
 	return msg
+}
+
+// Size returns the number of bytes the domain name occupies in the canonical
+// wire format, including the terminating root label: one length octet plus
+// each character for every non-root label, and one octet for the root label
+// itself.
+func (d DomainName) Size() uint32 {
+	size := uint32(1) // terminating root label
+	for _, label := range d.labels {
+		if s := label.Size(); s > 0 {
+			size += 1 + s
+		}
+	}
+	return size
+}
+
+// IsRoot reports whether d is the root domain, i.e. it has no non-root
+// labels. The zero-value DomainName (no labels) represents the root domain,
+// mirroring the empty legacy Domainname; a nil legacy Domainname is reported
+// as not root by (*Domainname).IsRoot.
+func (d DomainName) IsRoot() bool {
+	for _, label := range d.labels {
+		if label.Size() > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 type Domainname [][]byte

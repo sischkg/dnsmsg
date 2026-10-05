@@ -694,6 +694,133 @@ func TestNewDomainNameFromWireFormat(t *testing.T) {
 	})
 }
 
+func TestNewDomainNameFromCompressedWireFormat(t *testing.T) {
+	// RFC 1035 Section 4.1.4: 圧縮ポインタ(0xC0 + 14ビットオフセット)は
+	// 名前中のどこにでも出現しうる。返される end はポインタ先の後ろでなく、
+	// 元の名後の位置であり、その名に続くフィールドの解析に重要である。
+	tests := []struct {
+		name    string
+		input   WireFormat
+		index   uint32
+		want    DomainName
+		wantEnd uint32
+		wantErr bool
+	}{
+		{
+			name:  "name without compression",
+			input: WireFormat{3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0},
+			want: DomainName{labels: []Label{
+				{data: []byte("www")},
+				{data: []byte("example")},
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			wantEnd: 17,
+		},
+		{
+			name:    "root domain",
+			input:   WireFormat{0},
+			want:    DomainName{labels: []Label{{data: []byte{}}}},
+			wantEnd: 1,
+		},
+		{
+			name:  "pointer to the start of the name",
+			input: WireFormat{3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0, 0xC0, 0x00},
+			index: 17,
+			want: DomainName{labels: []Label{
+				{data: []byte("www")},
+				{data: []byte("example")},
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			wantEnd: 19,
+		},
+		{
+			name:  "pointer to a mid-name position",
+			input: WireFormat{3, 'w', 'w', 'w', 0, 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0, 0xC0, 0x05},
+			index: 18,
+			want: DomainName{labels: []Label{
+				{data: []byte("example")},
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			wantEnd: 20,
+		},
+		{
+			name:  "label followed by a pointer",
+			input: WireFormat{3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0, 1, 's', 0xC0, 0x00},
+			index: 17,
+			want: DomainName{labels: []Label{
+				{data: []byte("s")},
+				{data: []byte("www")},
+				{data: []byte("example")},
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			wantEnd: 21,
+		},
+		{
+			name:  "chained pointers",
+			input: WireFormat{3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0, 0xC0, 0x00, 0xC0, 0x11},
+			index: 19,
+			want: DomainName{labels: []Label{
+				{data: []byte("www")},
+				{data: []byte("example")},
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			wantEnd: 21,
+		},
+		{
+			name:    "offset beyond 255 (multi-byte pointer offset)",
+			input:   append(append(append([]byte{3, 'c', 'o', 'm', 0}, make([]byte, 295)...), 1, 'x', 0, 0), 0xC1, 0x2C),
+			index:   304,
+			want:    DomainName{labels: []Label{{data: []byte("x")}, {data: []byte{}}}},
+			wantEnd: 306,
+		},
+		{
+			name:    "pointer to itself is rejected",
+			input:   WireFormat{0xC0, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "forward pointer is rejected",
+			input:   WireFormat{0xC0, 0x05, 0, 0, 0, 0xC0, 0x00},
+			wantErr: true,
+		},
+		{
+			name:    "pointer offset out of range is rejected",
+			input:   WireFormat{0xC0, 0xFF},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, end, err := NewDomainNameFromCompressedWireFormat(&tt.input, tt.index)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewDomainNameFromCompressedWireFormat() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if !reflect.DeepEqual(got, tt.want) {
+					t.Errorf("NewDomainNameFromCompressedWireFormat() = %v, want %v", got, tt.want)
+				}
+				if end != tt.wantEnd {
+					t.Errorf("NewDomainNameFromCompressedWireFormat() end = %v, want %v", end, tt.wantEnd)
+				}
+			}
+		})
+	}
+
+	t.Run("nil *WireFormat is an error", func(t *testing.T) {
+		var w *WireFormat
+		if _, _, err := NewDomainNameFromCompressedWireFormat(w, 0); err == nil {
+			t.Errorf("NewDomainNameFromCompressedWireFormat(nil) error = nil, want non-nil")
+		}
+	})
+}
+
 func TestDomainNameString(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -822,6 +949,62 @@ func TestDomainNameCanonicalDomainName(t *testing.T) {
 			}
 			if !got.Equal(tt.want) {
 				t.Errorf("DomainName.CanonicalDomainName() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDomainNameCanonicalWireFormat(t *testing.T) {
+	tests := []struct {
+		name  string
+		input DomainName
+		want  WireFormat
+	}{
+		{
+			name:  "zero value is the root domain",
+			input: DomainName{},
+			want:  WireFormat{0},
+		},
+		{
+			name:  "root domain",
+			input: NewRootDomainName(),
+			want:  WireFormat{0},
+		},
+		{
+			name: "single label",
+			input: DomainName{labels: []Label{
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			want: WireFormat{3, 'c', 'o', 'm', 0},
+		},
+		{
+			name: "three labels",
+			input: DomainName{labels: []Label{
+				{data: []byte("www")},
+				{data: []byte("example")},
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			want: WireFormat{3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0},
+		},
+		{
+			name: "upper and mixed case lowered",
+			input: DomainName{labels: []Label{
+				{data: []byte("WWW")},
+				{data: []byte("Example")},
+				{data: []byte("COM")},
+				{data: []byte{}},
+			}},
+			want: WireFormat{3, 'w', 'w', 'w', 7, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 3, 'c', 'o', 'm', 0},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.input.CanonicalWireFormat()
+			if !bytes.Equal(got, tt.want) {
+				t.Errorf("DomainName.CanonicalWireFormat() = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -1070,6 +1253,110 @@ func TestDomainNameDBKey(t *testing.T) {
 			t.Errorf("DBKey() = %v, want legacy %v", dn.DBKey(), legacy.DBKey())
 		}
 	})
+}
+
+func TestDomainNameSize(t *testing.T) {
+	tests := []struct {
+		name  string
+		input DomainName
+		want  uint32
+	}{
+		{
+			name:  "zero value is just the root terminator",
+			input: DomainName{},
+			want:  1,
+		},
+		{
+			name:  "root domain",
+			input: NewRootDomainName(),
+			want:  1,
+		},
+		{
+			name: "single label",
+			input: DomainName{labels: []Label{
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			want: 5,
+		},
+		{
+			name: "three labels",
+			input: DomainName{labels: []Label{
+				{data: []byte("www")},
+				{data: []byte("example")},
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			want: 17,
+		},
+		{
+			name: "upper and mixed case does not change the size",
+			input: DomainName{labels: []Label{
+				{data: []byte("WWW")},
+				{data: []byte("Example")},
+				{data: []byte("COM")},
+				{data: []byte{}},
+			}},
+			want: 17,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.input.Size(); got != tt.want {
+				t.Errorf("DomainName.Size() = %v, want %v", got, tt.want)
+			}
+			// Size() must agree with the canonical wire encoding it describes.
+			if got := uint32(len(tt.input.CanonicalWireFormat())); got != tt.want {
+				t.Errorf("len(CanonicalWireFormat()) = %v, want Size() %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDomainNameIsRoot(t *testing.T) {
+	tests := []struct {
+		name  string
+		input DomainName
+		want  bool
+	}{
+		{
+			name:  "zero value is the root domain",
+			input: DomainName{},
+			want:  true,
+		},
+		{
+			name:  "root domain",
+			input: NewRootDomainName(),
+			want:  true,
+		},
+		{
+			name: "single label",
+			input: DomainName{labels: []Label{
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			want: false,
+		},
+		{
+			name: "three labels",
+			input: DomainName{labels: []Label{
+				{data: []byte("www")},
+				{data: []byte("example")},
+				{data: []byte("com")},
+				{data: []byte{}},
+			}},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.input.IsRoot(); got != tt.want {
+				t.Errorf("DomainName.IsRoot() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
 
 func TestNameCompressionDBDomainName(t *testing.T) {
