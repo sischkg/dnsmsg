@@ -65,7 +65,7 @@ func TestParseRecordRRSIG(t *testing.T) {
 			}(),
 			begin:   0,
 			// Wire-format parsing represents the root domain as a single
-			// root label (see TestNewCanonicalDomainnameFromBytes).
+			// root label.
 			want:    NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, NewRootDomainName(), []byte{0xDE, 0xAD, 0xBE, 0xEF}),
 			wantPos: 23, // 18 + 1 (root) + 4
 			wantErr: false,

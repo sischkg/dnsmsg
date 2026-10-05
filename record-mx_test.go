@@ -124,7 +124,7 @@ func TestRecordMX_AppendWireFormat(t *testing.T) {
 
 	// Preference (2 bytes: 0, 10) + domain name ("mail.example.com." = 4 + 7 + 3 = 14 + 3 = 17)
 	// Total should be 2 + 17 = 19
-	// Wait, NewDomainname("mail.example.com") is [mail, example, com]
+	// Wait, the domain name is [mail, example, com]
 	// Lengths: 4, 7, 3.
 	// Wire format: \x04mail\x07example\x03com\x00
 	// Total size = 2 + (1 + 4) + (1 + 7) + (1 + 3) + 1 = 2 + 5 + 8 + 4 + 1 = 20.

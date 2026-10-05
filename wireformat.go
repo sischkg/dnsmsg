@@ -71,53 +71,6 @@ func (w *WireFormat) PutUint32(index uint32, v uint32) (uint32, error) {
 	return 4, nil
 }
 
-func (w *WireFormat) AppendCanonicalDomainname(name Domainname) uint32 {
-	if w == nil {
-		return 0
-	}
-	wire := name.CanonicalWireFormat()
-	if wire == nil {
-		return 0
-	}
-	return w.AppendBytes(wire)
-}
-
-// AppendDomainname appends a domain name and uses compression for suffixes
-// which have already been written to the message.  The offset in a DNS
-// compression pointer has only fourteen bits, so compression is disabled once
-// the current message offset no longer fits in that field.
-func (w *WireFormat) AppendDomainname(name Domainname, db *NameCompressionDB) uint32 {
-	if w == nil {
-		return 0
-	}
-	if name.IsRoot() {
-		w.AppendUInt8(0)
-		return 1
-	}
-
-	var size uint32
-	for i, label := range name {
-		suffix := name[i:]
-
-		if db != nil {
-			if pointer, found := db.Find(suffix); found &&
-				uint32(pointer) < w.Size() && uint32(pointer) <= domainnameCompressionMaxOffset {
-				size += w.AppendUInt16(0xc000 | pointer)
-				return size
-			}
-			if w.Size() <= domainnameCompressionMaxOffset {
-				db.Add(suffix, uint16(w.Size()))
-			}
-		}
-
-		size += w.AppendUInt8(uint8(len(label)))
-		size += w.AppendBytes(label)
-	}
-
-	size += w.AppendUInt8(0)
-	return size
-}
-
 // AppendDomainName appends a DomainName and uses compression for suffixes
 // which have already been written to the message.  The offset in a DNS
 // compression pointer has only fourteen bits, so compression is disabled
@@ -157,8 +110,7 @@ func (w *WireFormat) AppendDomainName(name DomainName, db *NameCompressionDB) ui
 
 // AppendCanonicalDomainName appends the canonical wire representation of
 // name (RFC 4034 Section 6.2: lower-case, uncompressed, terminated by a
-// single zero octet) to w. This is the DomainName counterpart of
-// AppendCanonicalDomainname.
+// single zero octet) to w.
 func (w *WireFormat) AppendCanonicalDomainName(name DomainName) uint32 {
 	if w == nil {
 		return 0

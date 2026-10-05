@@ -225,33 +225,22 @@ func NewDomainNameFromLabel(ls []Label) (DomainName, error) {
 }
 
 // NewDomainNameFromWireFormat reads the domain name that begins at index in
-// the wire format.  Unlike the message parser shared by
-// NewDomainnameFromWireFormat, name compression is not expanded: a
-// compression pointer, a missing root label by the end of the wire format, or
-// a label type other than a length-prefixed label all produce an error.
+// the wire format.  Name compression is not expanded: a compression pointer,
+// a missing root label by the end of the wire format, or a label type other
+// than a length-prefixed label all produce an error.
 func NewDomainNameFromWireFormat(w *WireFormat, index uint32) (DomainName, error) {
 	if w == nil {
 		return DomainName{}, fmt.Errorf("wireFormat is nil")
 	}
 
-	name, _, err := parseDomainname(*w, index, false)
+	labels, _, err := parseDomainnameLabels(*w, index, false)
 	if err != nil {
 		return DomainName{}, err
 	}
-
-	d := NewRootDomainName()
-	for _, label := range name {
-		l, e := NewLabel(label)
-		if e != nil {
-			return DomainName{}, e
-		}
-		d.AppendLabel(l)
-	}
-	return d, nil
+	return newDomainNameFromLabels(labels)
 }
 
-// NewDomainNameFromCompressedWireFormat is the DomainName counterpart of
-// NewDomainnameFromWireFormat: it reads the domain name that begins at
+// NewDomainNameFromCompressedWireFormat reads the domain name that begins at
 // index in the wire format, expanding name compression (RFC 1035 Section
 // 4.1.4).  The returned end is the offset immediately after the encoded
 // name, not after the pointer target; that distinction is important when
@@ -261,20 +250,30 @@ func NewDomainNameFromCompressedWireFormat(w *WireFormat, index uint32) (DomainN
 		return DomainName{}, 0, fmt.Errorf("wireFormat is nil")
 	}
 
-	name, end, err := parseDomainname(*w, index, true)
+	labels, end, err := parseDomainnameLabels(*w, index, true)
 	if err != nil {
 		return DomainName{}, end, err
 	}
 
+	d, e := newDomainNameFromLabels(labels)
+	if e != nil {
+		return DomainName{}, end, e
+	}
+	return d, end, nil
+}
+
+// newDomainNameFromLabels builds a DomainName from the wire labels, most
+// specific first, appended to the root-terminated name.
+func newDomainNameFromLabels(labels [][]byte) (DomainName, error) {
 	d := NewRootDomainName()
-	for _, label := range name {
+	for _, label := range labels {
 		l, e := NewLabel(label)
 		if e != nil {
-			return DomainName{}, end, e
+			return DomainName{}, e
 		}
 		d.AppendLabel(l)
 	}
-	return d, end, nil
+	return d, nil
 }
 
 // String returns the presentation form of the domain name: the labels
@@ -379,8 +378,7 @@ func (d DomainName) ParentDomainNames() []DomainName {
 // NameCompressionDB.  The key is the wire-format encoding of the name
 // (RFC 1035 Section 4.1.4) with ASCII letters in canonical lower-case form
 // (RFC 4034 Section 6.2), so that names compare equal regardless of case,
-// as in RFC 4343 Section 2.  A DomainName and a Domainname for the same
-// domain yield the same key.  Names whose encoding does not fit in
+// as in RFC 4343 Section 2.  Names whose encoding does not fit in
 // DOMAINNAME_MAX_LENGTH octets yield the truncated encoding.
 func (d DomainName) DBKey() [DOMAINNAME_MAX_LENGTH]byte {
 	var msg [DOMAINNAME_MAX_LENGTH]byte
@@ -416,9 +414,7 @@ func (d DomainName) Size() uint32 {
 }
 
 // IsRoot reports whether d is the root domain, i.e. it has no non-root
-// labels. The zero-value DomainName (no labels) represents the root domain,
-// mirroring the empty legacy Domainname; a nil legacy Domainname is reported
-// as not root by (*Domainname).IsRoot.
+// labels. The zero-value DomainName (no labels) represents the root domain.
 func (d DomainName) IsRoot() bool {
 	for _, label := range d.labels {
 		if label.Size() > 0 {
@@ -428,38 +424,17 @@ func (d DomainName) IsRoot() bool {
 	return true
 }
 
-type Domainname [][]byte
-
 type NameCompressionDB struct {
 	nameToPointer map[[DOMAINNAME_MAX_LENGTH]byte]uint16
 }
 
-// NewCanonicalDomainnameFromBytes parses an uncompressed domain name from
-// the beginning of msg.  The terminating zero octet is consumed, but is not
-// represented as an empty label in the returned Domainname.
-func NewCanonicalDomainnameFromBytes(msg []byte) (Domainname, error) {
-	name, _, err := parseDomainname(msg, 0, false)
-	if err != nil {
-		return name, err
-	}
-	return name, nil
-}
-
-// NewDomainnameFromWireFormat parses the domain name beginning at begin in a
-// DNS message.  Compression pointers are expanded, while the returned offset
-// is the offset immediately after the encoded name in msg (not after the
-// pointer target).  That distinction is important when parsing fields which
-// follow a name.
-func NewDomainnameFromWireFormat(msg []byte, begin uint32) (Domainname, uint32, error) {
-	return parseDomainname(msg, begin, true)
-}
-
-// parseDomainname is shared by the canonical (uncompressed) parser and the
-// message parser.  A pointer must point to an earlier location in the
-// message.  In addition to enforcing that rule, we remember pointer locations
-// so malformed messages cannot make us follow a compression cycle.
-func parseDomainname(msg []byte, begin uint32, allowCompression bool) (Domainname, uint32, error) {
-	var name Domainname
+// parseDomainnameLabels is shared by the canonical (uncompressed) parser and
+// the message parser, and returns the raw wire labels of the name.  A pointer
+// must point to an earlier location in the message.  In addition to enforcing
+// that rule, we remember pointer locations so malformed messages cannot make
+// us follow a compression cycle.
+func parseDomainnameLabels(msg []byte, begin uint32, allowCompression bool) ([][]byte, uint32, error) {
+	var name [][]byte
 
 	messageLength := uint64(len(msg))
 	if uint64(begin) >= messageLength {
@@ -551,62 +526,6 @@ func parseDomainname(msg []byte, begin uint32, allowCompression bool) (Domainnam
 	}
 }
 
-// NewDomainname converts a presentation-format domain name to the internal
-// label representation.  A trailing dot is retained as an explicit empty
-// terminal label for compatibility with the original API, but all wire-format
-// and string operations treat that label as the DNS root terminator.
-func NewDomainname(name string) (Domainname, error) {
-	if name == "" || name == "." {
-		return Domainname{}, nil
-	}
-
-	var d Domainname
-	var label []byte
-	wireSize := uint32(1) // terminating root label
-
-	for pos := 0; pos < len(name); {
-		if name[pos] == '.' {
-			if len(label) == 0 {
-				return nil, fmt.Errorf("invalid domainname(empty label)")
-			}
-			increment := uint32(1 + len(label))
-			if wireSize > DOMAINNAME_MAX_LENGTH-increment {
-				return nil, fmt.Errorf("domainname %q is too long", name)
-			}
-			wireSize += increment
-			d = append(d, label)
-			label = []byte{}
-			pos++
-			continue
-		}
-
-		octet, next, err := parsePresentationOctet(name, pos)
-		if err != nil {
-			return nil, err
-		}
-		if len(label) >= domainnameMaxLabelLength {
-			return nil, fmt.Errorf("domainname label is too long(length exceeds %d)", domainnameMaxLabelLength)
-		}
-		label = append(label, octet)
-		pos = next
-	}
-
-	// Preserve a trailing empty label for the old representation.  It is
-	// removed by domainnameLabels before encoding or comparing names.
-	if len(label) > 0 {
-		increment := uint32(1 + len(label))
-		if wireSize > DOMAINNAME_MAX_LENGTH-increment {
-			return nil, fmt.Errorf("domainname %q is too long", name)
-		}
-		wireSize += increment
-	}
-	d = append(d, label)
-	if wireSize > DOMAINNAME_MAX_LENGTH {
-		return nil, fmt.Errorf("domainname %q is too long", name)
-	}
-	return d, nil
-}
-
 // parsePresentationOctet parses one presentation-format octet.  RFC 4343
 // defines a backslash followed by exactly three decimal digits as an octet
 // escape; backslash-dot and backslash-backslash are also used for the two
@@ -642,157 +561,11 @@ func parsePresentationOctet(name string, pos int) (byte, int, error) {
 	return next, pos + 2, nil
 }
 
-func domainnameWireSize(labels [][]byte) (uint32, bool) {
-	size := uint32(1) // terminating zero octet
-	for _, label := range labels {
-		if len(label) == 0 || len(label) > domainnameMaxLabelLength {
-			return 0, false
-		}
-		increment := uint32(1 + len(label))
-		if size > DOMAINNAME_MAX_LENGTH-increment {
-			return 0, false
-		}
-		size += increment
-	}
-	return size, true
-}
-
 func asciiLower(b byte) byte {
 	if b >= 'A' && b <= 'Z' {
 		return b + ('a' - 'A')
 	}
 	return b
-}
-
-func (name *Domainname) String() string {
-	if name == nil {
-		return "."
-	}
-
-	if len(*name) == 0 || len(*name) == 1 && len((*name)[0]) == 0 {
-		return "."
-	}
-
-	var buf bytes.Buffer
-	for _, label := range *name {
-		if len(label) == 0 {
-			break
-		}
-		for _, c := range label {
-			switch {
-			case c == '.' || c == '\\':
-				buf.WriteByte('\\')
-				buf.WriteByte(c)
-			case c >= 0x21 && c <= 0x7e:
-				buf.WriteByte(c)
-			default:
-				buf.WriteByte('\\')
-				buf.WriteByte('0' + c/100)
-				buf.WriteByte('0' + (c/10)%10)
-				buf.WriteByte('0' + c%10)
-			}
-		}
-		buf.WriteByte('.')
-	}
-	return buf.String()
-}
-
-// CanonicalWireFormat returns the RFC 4034-style lower-case ASCII wire form,
-// including the terminating root label.  Domainnames built by NewDomainname
-// are validated before reaching this method; an invalid manually-constructed
-// value is represented by nil because this legacy method has no error return.
-func (name *Domainname) CanonicalWireFormat() []byte {
-	if name == nil {
-		return []byte{0}
-	}
-
-	size, ok := domainnameWireSize(*name)
-	if !ok {
-		return nil
-	}
-
-	msg := make([]byte, 0, int(size))
-	for _, label := range *name {
-		msg = append(msg, byte(len(label)))
-		for _, c := range label {
-			msg = append(msg, asciiLower(c))
-		}
-	}
-	msg = append(msg, 0)
-	return msg
-}
-
-func (name *Domainname) Size() uint32 {
-	if name == nil {
-		return 1
-	}
-	size, ok := domainnameWireSize(*name)
-	if !ok {
-		return 0
-	}
-	return size
-}
-
-func (name *Domainname) DBKey() [DOMAINNAME_MAX_LENGTH]byte {
-	var msg [DOMAINNAME_MAX_LENGTH]byte
-	if name == nil {
-		return msg
-	}
-
-	i := 0
-	for _, label := range *name {
-		if len(label) == 0 || len(label) > domainnameMaxLabelLength || i+1+len(label) >= len(msg) {
-			break
-		}
-		msg[i] = byte(len(label))
-		i++
-		for _, c := range label {
-			msg[i] = asciiLower(c)
-			i++
-		}
-	}
-	msg[i] = 0
-	return msg
-}
-
-func (name *Domainname) Suffixes() (suffixes []Domainname) {
-	if name == nil {
-		return nil
-	}
-	for i := range *name {
-		suffixes = append(suffixes, (*name)[i:])
-	}
-	return
-}
-
-func (name *Domainname) IsRoot() bool {
-	if name == nil {
-		return false
-	}
-	if len(*name) == 0 || len((*name)[0]) == 0 {
-		return true
-	}
-	return false
-}
-
-func (lhs Domainname) Equal(rhs Domainname) bool {
-	if len(lhs) != len(rhs) {
-		return false
-	}
-	for i, l := range lhs {
-		r := rhs[i]
-		if len(l) != len(r) {
-			return false
-		}
-		for j, a := range l {
-			b := r[j]
-			if a != b {
-				return false
-			}
-		}
-	}
-
-	return true
 }
 
 func NewNameCompressionDB() *NameCompressionDB {
@@ -801,28 +574,9 @@ func NewNameCompressionDB() *NameCompressionDB {
 	return db
 }
 
-func (db *NameCompressionDB) Find(name Domainname) (pointer uint16, found bool) {
-	if db == nil {
-		return 0, false
-	}
-	key := name.DBKey()
-	pointer, found = db.nameToPointer[key]
-	return
-}
-
-func (db *NameCompressionDB) Add(name Domainname, p uint16) {
-	if db == nil {
-		return
-	}
-	if db.nameToPointer == nil {
-		db.nameToPointer = make(map[[DOMAINNAME_MAX_LENGTH]byte]uint16)
-	}
-	db.nameToPointer[name.DBKey()] = p
-}
-
-// FindDomainName is the DomainName counterpart of Find: it reports whether
-// the name has already been written to the message and returns the offset
-// at which it begins.  Lookups are case insensitive, as in RFC 4343 Section 2.
+// FindDomainName reports whether the name has already been written to the
+// message and returns the offset at which it begins.  Lookups are case
+// insensitive, as in RFC 4343 Section 2.
 func (db *NameCompressionDB) FindDomainName(name DomainName) (pointer uint16, found bool) {
 	if db == nil {
 		return 0, false
@@ -831,9 +585,9 @@ func (db *NameCompressionDB) FindDomainName(name DomainName) (pointer uint16, fo
 	return
 }
 
-// AddDomainName is the DomainName counterpart of Add: it records the offset
-// at which the name has been written to the message, so that later
-// occurrences of the same name can be written as a compression pointer.
+// AddDomainName records the offset at which the name has been written to the
+// message, so that later occurrences of the same name can be written as a
+// compression pointer.
 func (db *NameCompressionDB) AddDomainName(name DomainName, p uint16) {
 	if db == nil {
 		return

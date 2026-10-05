@@ -1243,16 +1243,6 @@ func TestDomainNameDBKey(t *testing.T) {
 		}
 	})
 
-	t.Run("same key as legacy Domainname", func(t *testing.T) {
-		dn, err := NewDomainNameFromString("www.example.com.")
-		if err != nil {
-			t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
-		}
-		legacy := Domainname{{'w', 'w', 'w'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
-		if dn.DBKey() != legacy.DBKey() {
-			t.Errorf("DBKey() = %v, want legacy %v", dn.DBKey(), legacy.DBKey())
-		}
-	})
 }
 
 func TestDomainNameSize(t *testing.T) {
@@ -1391,37 +1381,6 @@ func TestNameCompressionDBDomainName(t *testing.T) {
 		t.Error("NameCompressionDB.FindDomainName() should find name under different case")
 	} else if pointer != 10 {
 		t.Errorf("NameCompressionDB.FindDomainName() = %v, want %v", pointer, 10)
-	}
-}
-
-func TestNameCompressionDBDomainName_CrossType(t *testing.T) {
-	// The keys of DomainName and Domainname are identical, so names added
-	// through one type are visible through the other.
-	db := NewNameCompressionDB()
-
-	legacy := Domainname{{'W', 'w', 'W'}, {'e', 'x', 'a', 'm', 'p', 'l', 'e'}, {'c', 'o', 'm'}}
-	db.Add(legacy, 10)
-
-	name, err := NewDomainNameFromString("www.example.com.")
-	if err != nil {
-		t.Fatalf("NewDomainNameFromString() error = %v, want nil", err)
-	}
-	if pointer, found := db.FindDomainName(name); !found {
-		t.Error("FindDomainName() should find the name added through Domainname")
-	} else if pointer != 10 {
-		t.Errorf("FindDomainName() = %v, want %v", pointer, 10)
-	}
-	if pointer, found := db.Find(legacy); !found {
-		t.Error("Find() should still find the name")
-	} else if pointer != 10 {
-		t.Errorf("Find() = %v, want %v", pointer, 10)
-	}
-
-	db.AddDomainName(name, 20)
-	if pointer, found := db.Find(legacy); !found {
-		t.Error("Find() should find the name added through DomainName")
-	} else if pointer != 20 {
-		t.Errorf("Find() = %v, want %v", pointer, 20)
 	}
 }
 
