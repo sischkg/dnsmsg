@@ -11,6 +11,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 		name    string
 		input   []byte
 		begin   uint32
+		end     uint32
 		want    RecordDNSKEY
 		wantPos uint32
 		wantErr bool
@@ -20,6 +21,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			// Flags=256 (0x0100), Protocol=3, Algorithm=5 (RSASHA1), PublicKey=6 bytes
 			input: []byte{0x01, 0x00, 0x03, 0x05, 0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF},
 			begin: 0,
+			end:   10,
 			want: NewRecordDNSKEY(
 				256,
 				3,
@@ -34,6 +36,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			// Flags=256, Protocol=3, Algorithm=8 (RSASHA256), PublicKey=8 bytes
 			input: []byte{0x01, 0x00, 0x03, 0x08, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08},
 			begin: 0,
+			end:   12,
 			want: NewRecordDNSKEY(
 				256,
 				3,
@@ -48,6 +51,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			// Flags=256 (ZSK), Protocol=3, Algorithm=13 (ECDSAP256SHA256)
 			input: []byte{0x01, 0x00, 0x03, 0x0D, 0xDE, 0xAD, 0xBE, 0xEF},
 			begin: 0,
+			end:   8,
 			want: NewRecordDNSKEY(
 				256,
 				3,
@@ -62,6 +66,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			// Flags=257 (KSK), Protocol=3, Algorithm=14 (ECDSAP384SHA384)
 			input: []byte{0x01, 0x01, 0x03, 0x0E, 0xCA, 0xFE},
 			begin: 0,
+			end:   6,
 			want: NewRecordDNSKEY(
 				257,
 				3,
@@ -72,9 +77,26 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			wantErr: false,
 		},
 		{
+			name: "public key bounded by RDLENGTH, trailing data ignored",
+			// Flags=256, Protocol=3, Algorithm=5, PublicKey={0xAA,0xBB} (2 bytes)
+			// followed by 4 trailing bytes that must NOT be absorbed into the key.
+			input: []byte{0x01, 0x00, 0x03, 0x05, 0xAA, 0xBB, 0x11, 0x22, 0x33, 0x44},
+			begin: 0,
+			end:   6,
+			want: NewRecordDNSKEY(
+				256,
+				3,
+				5,
+				[]byte{0xAA, 0xBB},
+			),
+			wantPos: 6,
+			wantErr: false,
+		},
+		{
 			name:    "truncated input - missing flags",
 			input:   []byte{0x01},
 			begin:   0,
+			end:     1,
 			want:    RecordDNSKEY{},
 			wantErr: true,
 		},
@@ -82,6 +104,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			name:    "truncated input - missing protocol",
 			input:   []byte{0x01, 0x00},
 			begin:   0,
+			end:     2,
 			want:    RecordDNSKEY{},
 			wantErr: true,
 		},
@@ -89,6 +112,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			name:    "truncated input - missing algorithm",
 			input:   []byte{0x01, 0x00, 0x03},
 			begin:   0,
+			end:     3,
 			want:    RecordDNSKEY{},
 			wantErr: true,
 		},
@@ -96,6 +120,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			name:    "empty public key",
 			input:   []byte{0x01, 0x00, 0x03, 0x05},
 			begin:   0,
+			end:     4,
 			want:    RecordDNSKEY{},
 			wantErr: true,
 		},
@@ -103,6 +128,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 			name:    "out of bounds begin",
 			input:   []byte{0x01, 0x00, 0x03, 0x05, 0xAA},
 			begin:   10,
+			end:     5,
 			want:    RecordDNSKEY{},
 			wantErr: true,
 		},
@@ -110,7 +136,7 @@ func TestParseRecordDNSKEY(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, pos, err := ParseRecordDNSKEY(tt.input, tt.begin)
+			got, pos, err := ParseRecordDNSKEY(tt.input, tt.begin, tt.end)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseRecordDNSKEY() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -316,12 +342,12 @@ func TestRecordDNSKEYRoundTrip(t *testing.T) {
 	wire := original.CanonicalWireFormat()
 
 	// Parse back
-	parsed, end, err := ParseRecordDNSKEY(wire, 0)
+	parsed, pos, err := ParseRecordDNSKEY(wire, 0, uint32(len(wire)))
 	if err != nil {
 		t.Fatalf("ParseRecordDNSKEY() error = %v", err)
 	}
-	if end != uint32(len(wire)) {
-		t.Errorf("round trip end pos = %v, want %v", end, len(wire))
+	if pos != uint32(len(wire)) {
+		t.Errorf("round trip pos = %v, want %v", pos, len(wire))
 	}
 	if !reflect.DeepEqual(parsed, original) {
 		t.Errorf("round trip got = %v, want %v", parsed, original)
@@ -345,7 +371,7 @@ func TestRecordDNSKEYAppendWireFormat(t *testing.T) {
 	}
 
 	// Parse back from what we wrote
-	got, pos, err := ParseRecordDNSKEY(w, 0)
+	got, pos, err := ParseRecordDNSKEY(w, 0, size)
 	if err != nil {
 		t.Fatalf("ParseRecordDNSKEY() error = %v", err)
 	}

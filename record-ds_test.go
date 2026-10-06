@@ -11,6 +11,7 @@ func TestParseRecordDS(t *testing.T) {
 		name    string
 		input   []byte
 		begin   uint32
+		end     uint32
 		want    RecordDS
 		wantPos uint32
 		wantErr bool
@@ -69,11 +70,32 @@ func TestParseRecordDS(t *testing.T) {
 			want:    RecordDS{},
 			wantErr: true,
 		},
+		{
+			name:  "digest bounded by RDLENGTH, trailing data ignored",
+			input: append(
+				[]byte{0x03, 0xE8, 0x05, 0x01, 0x49, 0x54, 0x13, 0x37, 0x25, 0x9A, 0x9C, 0x70, 0x7B, 0x38, 0x9E, 0x22, 0xD1, 0x82, 0x2C, 0x82},
+				0xAA, 0xBB, 0xCC, // trailing bytes that must not be absorbed
+			),
+			begin: 0,
+			end:   20, // 4 (header) + 16 (SHA-1 digest)
+			want: NewRecordDS(
+				1000,
+				5,
+				1,
+				[]byte{0x49, 0x54, 0x13, 0x37, 0x25, 0x9A, 0x9C, 0x70, 0x7B, 0x38, 0x9E, 0x22, 0xD1, 0x82, 0x2C, 0x82},
+			),
+			wantPos: 20,
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, pos, err := ParseRecordDS(tt.input, tt.begin)
+			end := tt.end
+			if end == 0 {
+				end = uint32(len(tt.input))
+			}
+			got, pos, err := ParseRecordDS(tt.input, tt.begin, end)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseRecordDS() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -256,7 +278,7 @@ func TestRecordDSRoundTrip(t *testing.T) {
 	wire := original.CanonicalWireFormat()
 
 	// Parse back
-	parsed, end, err := ParseRecordDS(wire, 0)
+	parsed, end, err := ParseRecordDS(wire, 0, uint32(len(wire)))
 	if err != nil {
 		t.Fatalf("ParseRecordDS() error = %v", err)
 	}
@@ -285,7 +307,7 @@ func TestRecordDSAppendWireFormat(t *testing.T) {
 	}
 
 	// Parse back from what we wrote
-	got, pos, err := ParseRecordDS(w, 0)
+	got, pos, err := ParseRecordDS(w, 0, uint32(len(w)))
 	if err != nil {
 		t.Fatalf("ParseRecordDS() error = %v", err)
 	}

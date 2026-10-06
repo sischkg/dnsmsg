@@ -102,8 +102,10 @@ func NewRecordDSFromString(s string) (RecordDS, error) {
 	}, nil
 }
 
-// ParseRecordDS parses a DS record from wire format
-func ParseRecordDS(w WireFormat, begin uint32) (r RecordDS, end uint32, err error) {
+// ParseRecordDS parses a DS record from wire format. The digest is bounded
+// by end, the RDLENGTH-derived offset of the record, rather than the
+// remainder of the whole message.
+func ParseRecordDS(w WireFormat, begin uint32, end uint32) (r RecordDS, pos uint32, err error) {
 	var p uint32 = begin
 
 	keyTag, err := w.GetUInt16(p)
@@ -127,8 +129,17 @@ func ParseRecordDS(w WireFormat, begin uint32) (r RecordDS, end uint32, err erro
 	}
 	p += 1
 
-	// Digest is the remaining bytes
-	digest := w[p:]
+	// The digest occupies the remainder of the record's RDATA, bounded by
+	// end rather than the end of the whole message.
+	if end > uint32(w.Size()) {
+		err = fmt.Errorf("invalid DS record RDATA size")
+		return
+	}
+	if end < p {
+		err = fmt.Errorf("empty digest")
+		return
+	}
+	digest := w[p:end]
 	if len(digest) == 0 {
 		err = fmt.Errorf("empty digest")
 		return
@@ -140,7 +151,7 @@ func ParseRecordDS(w WireFormat, begin uint32) (r RecordDS, end uint32, err erro
 		DigestType: digestType,
 		Digest:     digest,
 	}
-	end = p + uint32(len(digest))
+	pos = end
 	return
 }
 

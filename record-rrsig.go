@@ -164,8 +164,10 @@ func NewRecordRRSIGFromString(s string) (RecordRRSIG, error) {
 	}, nil
 }
 
-// ParseRecordRRSIG parses an RRSIG record from wire format
-func ParseRecordRRSIG(w WireFormat, begin uint32) (r RecordRRSIG, end uint32, err error) {
+// ParseRecordRRSIG parses an RRSIG record from wire format. The signature is
+// bounded by end, the RDLENGTH-derived offset of the record, rather than the
+// remainder of the whole message.
+func ParseRecordRRSIG(w WireFormat, begin uint32, end uint32) (r RecordRRSIG, pos uint32, err error) {
 	var p uint32 = begin
 
 	typeCovered, err := w.GetUInt16(p)
@@ -223,8 +225,17 @@ func ParseRecordRRSIG(w WireFormat, begin uint32) (r RecordRRSIG, end uint32, er
 		return
 	}
 
-	// Signature is the remaining bytes
-	signature := w[p:]
+	// The signature occupies the remainder of the record's RDATA, bounded by
+	// end rather than the end of the whole message.
+	if end > uint32(w.Size()) {
+		err = fmt.Errorf("invalid RRSIG record RDATA size")
+		return
+	}
+	if end < p {
+		err = fmt.Errorf("empty signature")
+		return
+	}
+	signature := w[p:end]
 	if len(signature) == 0 {
 		err = fmt.Errorf("empty signature")
 		return
@@ -241,6 +252,6 @@ func ParseRecordRRSIG(w WireFormat, begin uint32) (r RecordRRSIG, end uint32, er
 		SignersName: signersName,
 		Signature:   signature,
 	}
-	end = p + uint32(len(signature))
+	pos = end
 	return
 }

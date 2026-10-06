@@ -262,11 +262,11 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 	case TYPE_AAAA:
 		rr.RData, _, err = ParseRecordAAAA(w, p)
 	case TYPE_DS:
-		rr.RData, _, err = ParseRecordDS(w, p)
+		rr.RData, _, err = ParseRecordDS(w, p, end)
 	case TYPE_RRSIG:
-		rr.RData, _, err = ParseRecordRRSIG(w, p)
+		rr.RData, _, err = ParseRecordRRSIG(w, p, end)
 	case TYPE_DNSKEY:
-		rr.RData, _, err = ParseRecordDNSKEY(w, p)
+		rr.RData, _, err = ParseRecordDNSKEY(w, p, end)
 	default:
 		rr.RData, _, err = ParseRecordRaw(w, p, end, rr.Type)
 	}

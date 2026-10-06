@@ -88,8 +88,10 @@ func NewRecordDNSKEYFromString(s string) (RecordDNSKEY, error) {
 	}, nil
 }
 
-// ParseRecordDNSKEY parses a DNSKEY record from wire format
-func ParseRecordDNSKEY(w WireFormat, begin uint32) (r RecordDNSKEY, end uint32, err error) {
+// ParseRecordDNSKEY parses a DNSKEY record from wire format. The public key
+// is bounded by end, the RDLENGTH-derived offset of the record, rather than
+// the remainder of the whole message.
+func ParseRecordDNSKEY(w WireFormat, begin uint32, end uint32) (r RecordDNSKEY, pos uint32, err error) {
 	var p uint32 = begin
 
 	flags, err := w.GetUInt16(p)
@@ -113,8 +115,17 @@ func ParseRecordDNSKEY(w WireFormat, begin uint32) (r RecordDNSKEY, end uint32, 
 	}
 	p += 1
 
-	// Public key is the remaining bytes
-	publicKey := w[p:]
+	// The public key occupies the remainder of the record's RDATA, bounded by
+	// end rather than the end of the whole message.
+	if end > uint32(w.Size()) {
+		err = fmt.Errorf("invalid DNSKEY record RDATA size")
+		return
+	}
+	if end < p {
+		err = fmt.Errorf("empty public key")
+		return
+	}
+	publicKey := w[p:end]
 	if len(publicKey) == 0 {
 		err = fmt.Errorf("empty public key")
 		return
@@ -126,6 +137,6 @@ func ParseRecordDNSKEY(w WireFormat, begin uint32) (r RecordDNSKEY, end uint32, 
 		Algorithm: algorithm,
 		PublicKey: publicKey,
 	}
-	end = p + uint32(len(publicKey))
+	pos = end
 	return
 }

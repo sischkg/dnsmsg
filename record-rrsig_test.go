@@ -30,6 +30,7 @@ func TestParseRecordRRSIG(t *testing.T) {
 		name    string
 		input   []byte
 		begin   uint32
+		end     uint32
 		want    RecordRRSIG
 		wantPos uint32
 		wantErr bool
@@ -112,11 +113,27 @@ func TestParseRecordRRSIG(t *testing.T) {
 			want:    RecordRRSIG{},
 			wantErr: true,
 		},
+		{
+			name:  "signature bounded by RDLENGTH, trailing data ignored",
+			input: func() []byte {
+				b := buildRRSIGWire(t, 1, 5, 3, 3600, 1700000000, 1690000000, 12345, signersName, signature)
+				return append(b, 0x99, 0x88, 0x77) // trailing bytes that must not be absorbed
+			}(),
+			begin:   0,
+			end:     43, // 18 (fixed) + 17 (ns1.example.com) + 8 (signature)
+			want:    NewRecordRRSIG(1, 5, 3, 3600, 1700000000, 1690000000, 12345, signersName, signature),
+			wantPos: 43,
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, pos, err := ParseRecordRRSIG(tt.input, tt.begin)
+			end := tt.end
+			if end == 0 {
+				end = uint32(len(tt.input))
+			}
+			got, pos, err := ParseRecordRRSIG(tt.input, tt.begin, end)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ParseRecordRRSIG() error = %v, wantErr %v", err, tt.wantErr)
 				return
@@ -326,7 +343,7 @@ func TestRecordRRSIGRoundTrip(t *testing.T) {
 	wire := original.CanonicalWireFormat()
 
 	// Parse back
-	parsed, end, err := ParseRecordRRSIG(wire, 0)
+	parsed, end, err := ParseRecordRRSIG(wire, 0, uint32(len(wire)))
 	if err != nil {
 		t.Fatalf("ParseRecordRRSIG() error = %v", err)
 	}
@@ -355,7 +372,7 @@ func TestRecordRRSIGAppendWireFormat(t *testing.T) {
 	}
 
 	// Parse back from what we wrote
-	got, pos, err := ParseRecordRRSIG(w, 0)
+	got, pos, err := ParseRecordRRSIG(w, 0, uint32(len(w)))
 	if err != nil {
 		t.Fatalf("ParseRecordRRSIG() error = %v", err)
 	}
@@ -454,7 +471,7 @@ func TestRecordRRSIGCompression(t *testing.T) {
 
 	// Parse using uncompressed wire format (RRSIG signature has no explicit length field,
 	// so parsing compressed RRSIG concatenated with other data is unreliable without RDLEN)
-	got1, _, err := ParseRecordRRSIG(w1, 0)
+	got1, _, err := ParseRecordRRSIG(w1, 0, uint32(len(w1)))
 	if err != nil {
 		t.Fatalf("ParseRecordRRSIG() first error = %v", err)
 	}
@@ -462,7 +479,7 @@ func TestRecordRRSIGCompression(t *testing.T) {
 		t.Errorf("first parsed RRSIG mismatch: got %+v, want %+v", got1, rrsig1)
 	}
 
-	got2, _, err := ParseRecordRRSIG(w2, 0)
+	got2, _, err := ParseRecordRRSIG(w2, 0, uint32(len(w2)))
 	if err != nil {
 		t.Fatalf("ParseRecordRRSIG() second error = %v", err)
 	}
