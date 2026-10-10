@@ -223,11 +223,11 @@ func TestParseWireFormat(t *testing.T) {
 		{
 			name: "unterminated question name",
 			input: WireFormat{
-				0, 0, 0, 0,   // ID, flags
-				0, 1,         // QDCOUNT = 1
-				0, 0,         // ANCOUNT
-				0, 0,         // NSCOUNT
-				0, 0,         // ARCOUNT
+				0, 0, 0, 0, // ID, flags
+				0, 1, // QDCOUNT = 1
+				0, 0, // ANCOUNT
+				0, 0, // NSCOUNT
+				0, 0, // ARCOUNT
 				0x02, 'e', 'x', // QNAME: label of two characters, never terminated
 			},
 			wantErr: true,
@@ -235,29 +235,29 @@ func TestParseWireFormat(t *testing.T) {
 		{
 			name: "compression pointer must point backwards",
 			input: WireFormat{
-				0, 0, 0, 0,         // ID, flags
-				0, 1,               // QDCOUNT = 1
-				0, 0,               // ANCOUNT
-				0, 0,               // NSCOUNT
-				0, 0,               // ARCOUNT
-				0xC0, 0x0C,         // QNAME: pointer to the name's own position
+				0, 0, 0, 0, // ID, flags
+				0, 1, // QDCOUNT = 1
+				0, 0, // ANCOUNT
+				0, 0, // NSCOUNT
+				0, 0, // ARCOUNT
+				0xC0, 0x0C, // QNAME: pointer to the name's own position
 			},
 			wantErr: true,
 		},
 		{
 			name: "answer record header truncated",
 			input: WireFormat{
-				0, 0, 0, 0,         // ID, flags
-				0, 1,               // QDCOUNT = 1
-				0, 1,               // ANCOUNT = 1
-				0, 0,               // NSCOUNT
-				0, 0,               // ARCOUNT
+				0, 0, 0, 0, // ID, flags
+				0, 1, // QDCOUNT = 1
+				0, 1, // ANCOUNT = 1
+				0, 0, // NSCOUNT
+				0, 0, // ARCOUNT
 				0x01, 'e', 0x01, 'x', 0, // question name: e.x
-				0, 1,               // QTYPE A
-				0, 1,               // QCLASS IN
+				0, 1, // QTYPE A
+				0, 1, // QCLASS IN
 				0x01, 'e', 0x01, 'x', 0, // answer name: e.x
-				0, 1,               // TYPE A
-				0, 1,               // CLASS IN (TTL and RDATA missing)
+				0, 1, // TYPE A
+				0, 1, // CLASS IN (TTL and RDATA missing)
 			},
 			wantErr: true,
 		},
@@ -295,12 +295,12 @@ func TestParseWireFormat(t *testing.T) {
 			name: "RRSIG record with empty signature",
 			input: craftedErrorWire(TYPE_RRSIG, 22,
 				0x00, 0x30, // type covered: DNSKEY
-				13,         // algorithm
-				3,          // labels
+				13,               // algorithm
+				3,                // labels
 				0, 0, 0x0E, 0x10, // original TTL
-				0, 0, 1, 0,   // expiration
-				0, 0, 0, 0,   // inception
-				0, 1,         // key tag
+				0, 0, 1, 0, // expiration
+				0, 0, 0, 0, // inception
+				0, 1, // key tag
 				2, 'n', 's', 0, // signers name: ns.
 			),
 			wantErr: true,
@@ -309,12 +309,12 @@ func TestParseWireFormat(t *testing.T) {
 			name: "RRSIG record RDATA extends beyond message",
 			input: craftedErrorWire(TYPE_RRSIG, 40,
 				0x00, 0x30, // type covered: DNSKEY
-				13,         // algorithm
-				3,          // labels
+				13,               // algorithm
+				3,                // labels
 				0, 0, 0x0E, 0x10, // original TTL
-				0, 0, 1, 0,   // expiration
-				0, 0, 0, 0,   // inception
-				0, 1,         // key tag
+				0, 0, 1, 0, // expiration
+				0, 0, 0, 0, // inception
+				0, 1, // key tag
 				2, 'n', 's', 0, // signers name: ns.
 				0xAA, 0xBB, 0xCC, 0xDD, // signature bytes
 			),
@@ -334,7 +334,7 @@ func TestParseWireFormat(t *testing.T) {
 			name: "MX record exchange name crosses end of message",
 			input: craftedErrorWire(TYPE_MX, 4,
 				0x00, 0x0A, // preference 10
-				0x02, 'n',  // label of two characters with only one present
+				0x02, 'n', // label of two characters with only one present
 			),
 			wantErr: true,
 		},
@@ -343,9 +343,9 @@ func TestParseWireFormat(t *testing.T) {
 			input: craftedErrorWire(TYPE_SOA, 19,
 				0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e', // mname: example
 				0x03, 'c', 'o', 'm', // mname: example.com
-				0x00, // root label
+				0x00,           // root label
 				0x02, 'a', 'd', // rname: ad
-				0x00, // root label
+				0x00,       // root label
 				0x00, 0x01, // only two of the twenty timer bytes
 			),
 			wantErr: true,
@@ -366,5 +366,242 @@ func TestParseWireFormat(t *testing.T) {
 				t.Errorf("ParseWireFormat() got =\n%#v\n\nwant =\n%#v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestWriteWireFormat(t *testing.T) {
+	example := testDomainName(t, "example.com.")
+
+	aReply := Message{
+		ID:      0x2345,
+		QR:      1,
+		RD:      1,
+		RA:      1,
+		QDCOUNT: 1,
+		ANCOUNT: 1,
+		QuestionSection: []QuestionSectionEntry{
+			{QName: example, Class: CLASS_IN, Type: TYPE_A},
+		},
+		AnswerSection: []ResourceRecord{
+			{
+				Name: example, Class: CLASS_IN, Type: TYPE_A, TTL: 3600,
+				RData: NewRecordA([4]byte{192, 0, 2, 53}),
+			},
+		},
+	}
+
+	mxReply := Message{
+		ID:      0x4321,
+		QR:      1,
+		RD:      1,
+		RA:      1,
+		QDCOUNT: 1,
+		ANCOUNT: 2,
+		ARCOUNT: 2,
+		QuestionSection: []QuestionSectionEntry{
+			{QName: example, Class: CLASS_IN, Type: TYPE_MX},
+		},
+		AnswerSection: []ResourceRecord{
+			{
+				Name: example, Class: CLASS_IN, Type: TYPE_MX, TTL: 3600,
+				RData: NewRecordMX(10, testDomainName(t, "mx01.example.com.")),
+			},
+			{
+				Name: example, Class: CLASS_IN, Type: TYPE_MX, TTL: 3600,
+				RData: NewRecordMX(20, testDomainName(t, "mx02.example.com.")),
+			},
+		},
+		AdditionalSection: []ResourceRecord{
+			{
+				Name: testDomainName(t, "mx01.example.com."), Class: CLASS_IN, Type: TYPE_A, TTL: 3600,
+				RData: NewRecordA([4]byte{192, 0, 2, 1}),
+			},
+			{
+				Name: testDomainName(t, "mx02.example.com."), Class: CLASS_IN, Type: TYPE_A, TTL: 3600,
+				RData: NewRecordA([4]byte{192, 0, 2, 2}),
+			},
+		},
+	}
+
+	tests := []struct {
+		name      string
+		seed      WireFormat // content pre-existing in the wire
+		msg       Message
+		want      WireFormat
+		roundTrip bool // parse the result back and compare with msg
+	}{
+		{
+			name: "empty message writes the 12-byte header only",
+			msg:  Message{ID: 0x1234},
+			want: WireFormat{
+				0x12, 0x34, // ID
+				0x00,       // flags1
+				0x00,       // flags2
+				0x00, 0x00, // QDCOUNT
+				0x00, 0x00, // ANCOUNT
+				0x00, 0x00, // NSCOUNT
+				0x00, 0x00, // ARCOUNT
+			},
+		},
+		{
+			name: "header flags occupy their RFC 1035 bit positions",
+			msg: Message{
+				ID: 0x1234,
+				QR: 1, OPCODE: 3, AA: 1, TC: 1, RD: 1,
+				RA: 1, Z: 1, AD: 1, CD: 1, RCODE: 3,
+			},
+			want: WireFormat{
+				0x12, 0x34, // ID
+				0x9F,       // flags1: QR|OPCODE(3)<<3|AA<<2|TC<<1|RD
+				0xF3,       // flags2: RA<<7|Z<<6|AD<<5|CD<<4|RCODE(3)
+				0x00, 0x00, // QDCOUNT
+				0x00, 0x00, // ANCOUNT
+				0x00, 0x00, // NSCOUNT
+				0x00, 0x00, // ARCOUNT
+			},
+		},
+		{
+			name: "section counts are written verbatim",
+			msg:  Message{QDCOUNT: 3, ANCOUNT: 4, NSCOUNT: 5, ARCOUNT: 6},
+			want: WireFormat{
+				0x00, 0x00, // ID
+				0x00,       // flags1
+				0x00,       // flags2
+				0x00, 0x03, // QDCOUNT
+				0x00, 0x04, // ANCOUNT
+				0x00, 0x05, // NSCOUNT
+				0x00, 0x06, // ARCOUNT
+			},
+		},
+		{
+			name: "answer name is emitted as a compression pointer to the question name",
+			msg:  aReply,
+			want: WireFormat{
+				0x23, 0x45, // ID
+				0x81,       // flags1: QR|RD
+				0x80,       // flags2: RA
+				0x00, 0x01, // QDCOUNT
+				0x00, 0x01, // ANCOUNT
+				0x00, 0x00, // NSCOUNT
+				0x00, 0x00, // ARCOUNT
+				0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e', // question name: example
+				0x03, 'c', 'o', 'm', // example.com
+				0x00,       // root label
+				0x00, 0x01, // QTYPE: A
+				0x00, 0x01, // QCLASS: IN
+				0xC0, 0x0C, // answer name: pointer to offset 12
+				0x00, 0x01, // TYPE: A
+				0x00, 0x01, // CLASS: IN
+				0x00, 0x00, 0x0E, 0x10, // TTL: 3600
+				0x00, 0x04, // RDLENGTH
+				192, 0, 2, 53, // RDATA: 192.0.2.53
+			},
+			roundTrip: true,
+		},
+		{
+			name: "appends after pre-existing content and rebases the compression pointer",
+			seed: WireFormat{0xFF},
+			msg:  aReply,
+			want: WireFormat{
+				0xFF,       // pre-existing content
+				0x23, 0x45, // ID
+				0x81,       // flags1: QR|RD
+				0x80,       // flags2: RA
+				0x00, 0x01, // QDCOUNT
+				0x00, 0x01, // ANCOUNT
+				0x00, 0x00, // NSCOUNT
+				0x00, 0x00, // ARCOUNT
+				0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e', // question name: example
+				0x03, 'c', 'o', 'm', // example.com
+				0x00,       // root label
+				0x00, 0x01, // QTYPE: A
+				0x00, 0x01, // QCLASS: IN
+				0xC0, 0x0D, // answer name: pointer to offset 13
+				0x00, 0x01, // TYPE: A
+				0x00, 0x01, // CLASS: IN
+				0x00, 0x00, 0x0E, 0x10, // TTL: 3600
+				0x00, 0x04, // RDLENGTH
+				192, 0, 2, 53, // RDATA: 192.0.2.53
+			},
+		},
+		{
+			name: "MX response: two MX answers with A glue in the additional section",
+			msg:  mxReply,
+			want: WireFormat{
+				0x43, 0x21, // ID
+				0x81,       // flags1: QR|RD
+				0x80,       // flags2: RA
+				0x00, 0x01, // QDCOUNT
+				0x00, 0x02, // ANCOUNT
+				0x00, 0x00, // NSCOUNT
+				0x00, 0x02, // ARCOUNT
+				0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e', // question name: example
+				0x03, 'c', 'o', 'm', // example.com
+				0x00,       // root label
+				0x00, 0x0F, // QTYPE: MX
+				0x00, 0x01, // QCLASS: IN
+				0xC0, 0x0C, // answer 1 name: pointer to offset 12 (example.com.)
+				0x00, 0x0F, // TYPE: MX
+				0x00, 0x01, // CLASS: IN
+				0x00, 0x00, 0x0E, 0x10, // TTL: 3600
+				0x00, 0x09, // RDLENGTH
+				0x00, 0x0A, // preference: 10
+				0x04, 'm', 'x', '0', '1', // exchange: mx01
+				0xC0, 0x0C, // ...example.com (pointer to offset 12)
+				0xC0, 0x0C, // answer 2 name: pointer to offset 12 (example.com.)
+				0x00, 0x0F, // TYPE: MX
+				0x00, 0x01, // CLASS: IN
+				0x00, 0x00, 0x0E, 0x10, // TTL: 3600
+				0x00, 0x09, // RDLENGTH
+				0x00, 0x14, // preference: 20
+				0x04, 'm', 'x', '0', '2', // exchange: mx02
+				0xC0, 0x0C, // ...example.com (pointer to offset 12)
+				0xC0, 0x2B, // additional 1 name: pointer to offset 43 (mx01.example.com.)
+				0x00, 0x01, // TYPE: A
+				0x00, 0x01, // CLASS: IN
+				0x00, 0x00, 0x0E, 0x10, // TTL: 3600
+				0x00, 0x04, // RDLENGTH
+				192, 0, 2, 1, // RDATA: 192.0.2.1
+				0xC0, 0x40, // additional 2 name: pointer to offset 64 (mx02.example.com.)
+				0x00, 0x01, // TYPE: A
+				0x00, 0x01, // CLASS: IN
+				0x00, 0x00, 0x0E, 0x10, // TTL: 3600
+				0x00, 0x04, // RDLENGTH
+				192, 0, 2, 2, // RDATA: 192.0.2.2
+			},
+			roundTrip: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			w := append(WireFormat{}, tt.seed...)
+			before := w.Size()
+			size := w.WriteWireFormat(tt.msg)
+			if size != w.Size()-before {
+				t.Errorf("WriteWireFormat() = %d bytes appended, want %d", size, w.Size()-before)
+			}
+			if !reflect.DeepEqual(w, tt.want) {
+				t.Errorf("WriteWireFormat() =\n%v\n\nwant =\n%v", w, tt.want)
+			}
+			if !tt.roundTrip {
+				return
+			}
+			got, err := ParseWireFormat(w)
+			if err != nil {
+				t.Fatalf("ParseWireFormat() error = %v", err)
+			}
+			if !reflect.DeepEqual(got, tt.msg) {
+				t.Errorf("ParseWireFormat(WriteWireFormat(m)) =\n%#v\n\nwant =\n%#v", got, tt.msg)
+			}
+		})
+	}
+}
+
+func TestWriteWireFormatNilWire(t *testing.T) {
+	var w *WireFormat
+	size := w.WriteWireFormat(Message{ID: 0x1234})
+	if size != 0 || w != nil {
+		t.Errorf("WriteWireFormat() on nil WireFormat = size %d, w %v; want 0, nil", size, w)
 	}
 }

@@ -12,6 +12,11 @@ import (
 const UDP_BUFFER_SIZE = 1 << 12
 const TCP_BUFFER_SIZE = 1 << 15
 
+// EDNS0DefaultPayloadSize is the default recommended EDNS(0) UDP payload
+// size advertised in the OPT record's TTL field (RFC 6891 Section 6.1.1,
+// the recommended value of 1232 bytes).
+const EDNS0DefaultPayloadSize uint32 = 1232
+
 const DOMAINNAME_MAX_LENGTH uint32 = 255
 
 const (
@@ -48,6 +53,7 @@ const (
 	TYPE_MX     ResourceType = 15
 	TYPE_AAAA   ResourceType = 28
 	TYPE_DS     ResourceType = 43
+	TYPE_OPT    ResourceType = 41
 	TYPE_RRSIG  ResourceType = 46
 	TYPE_DNSKEY ResourceType = 48
 )
@@ -66,6 +72,8 @@ func (t ResourceType) String() string {
 		return "AAAA"
 	case TYPE_DS:
 		return "DS"
+	case TYPE_OPT:
+		return "OPT"
 	case TYPE_RRSIG:
 		return "RRSIG"
 	case TYPE_DNSKEY:
@@ -95,6 +103,8 @@ func NewType(s string) (ResourceType, error) {
 		return TYPE_AAAA, nil
 	case "DS":
 		return TYPE_DS, nil
+	case "OPT":
+		return TYPE_OPT, nil
 	case "RRSIG":
 		return TYPE_RRSIG, nil
 	case "DNSKEY":
@@ -263,6 +273,8 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 		rr.RData, _, err = ParseRecordAAAA(w, p)
 	case TYPE_DS:
 		rr.RData, _, err = ParseRecordDS(w, p, end)
+	case TYPE_OPT:
+		rr.RData, _, err = ParseRecordOPT(w, p, end)
 	case TYPE_RRSIG:
 		rr.RData, _, err = ParseRecordRRSIG(w, p, end)
 	case TYPE_DNSKEY:
@@ -334,6 +346,37 @@ func (msg *Message) SetQuery(qname string, qclass ResourceClass, qtype ResourceT
 	msg.QuestionSection = []QuestionSectionEntry{q}
 	msg.QDCOUNT = 1
 	return nil
+}
+
+// SetEDNS0 arms an EDNS(0) OPT pseudo-record (RFC 6891) in the additional
+// section of msg.  The record's TTL advertises the UDP payload size that
+// msg can receive, FLAGS carries the EDNS(0) flags (such as EDNS0FlagDO)
+// and options are the requested EDNS(0) options (for example an NSID
+// option from NewEDNSOptionNSID).  Any OPT record already present in the
+// additional section is replaced, so calling SetEDNS0 repeatedly is
+// idempotent with respect to the ARCOUNT.
+func (msg *Message) SetEDNS0(payloadSize uint32, flags uint16, options ...EDNSOption) {
+	opt := ResourceRecord{
+		Name:  NewRootDomainName(),
+		Class: CLASS_IN,
+		Type:  TYPE_OPT,
+		TTL:   payloadSize,
+		RData: NewRecordOPT(EDNS0Version, flags, options...),
+	}
+
+	hadOPT := false
+	kept := make([]ResourceRecord, 0, len(msg.AdditionalSection))
+	for _, rr := range msg.AdditionalSection {
+		if rr.Type == TYPE_OPT {
+			hadOPT = true
+			continue
+		}
+		kept = append(kept, rr)
+	}
+	msg.AdditionalSection = append(kept, opt)
+	if !hadOPT {
+		msg.ARCOUNT++
+	}
 }
 
 func (w *WireFormat) WriteWireFormat(msg Message) uint32 {
