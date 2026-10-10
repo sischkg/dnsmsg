@@ -34,6 +34,30 @@ func TestParseRecordOPT(t *testing.T) {
 			wantEnd: 16,
 		},
 		{
+			name:    "EDE option with extra text",
+			input:   []byte{0x00, 0x80, 0x00, 0x00, 0x0f, 0x00, 0x07, 0x00, 0x06, 'b', 'o', 'g', 'u', 's'}, // Version 0, Flags DO, EDE code 6 "bogus"
+			begin:   0,
+			end:     14,
+			want:    NewRecordOPT(0, 0x8000, NewEDNSOptionEDE(6, "bogus")),
+			wantEnd: 14,
+		},
+		{
+			name:    "EDE option with empty extra text",
+			input:   []byte{0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x02, 0x00, 0x13}, // Version 0, Flags 0, EDE code 19
+			begin:   0,
+			end:     9,
+			want:    NewRecordOPT(0, 0, NewEDNSOptionEDE(19, "")),
+			wantEnd: 9,
+		},
+		{
+			name:    "truncated EDE option",
+			input:   []byte{0x00, 0x00, 0x00, 0x00, 0x0f, 0x00, 0x01, 0x41}, // Version 0, Flags 0, EDE with a 1-byte payload
+			begin:   0,
+			end:     8,
+			want:    NewRecordOPT(0, 0, EDNSOptionRaw{OptionCode: 15, OptionData: []byte{0x41}}),
+			wantEnd: 8,
+		},
+		{
 			name:    "client subnet option",
 			input:   []byte{0x00, 0x80, 0x00, 0x00, 0x08, 0x00, 0x08, 0x00, 0x00, 0x01, 0x18, 0x01, 0xc6, 0x33, 0x64}, // Version 0, Flags DO, ECS 198.51.100.0/24
 			begin:   0,
@@ -145,6 +169,11 @@ func TestNewRecordOPTFromString(t *testing.T) {
 			want:  NewRecordOPT(0, 0, EDNSOptionNSID{ID: "CDEF"}),
 		},
 		{
+			name:  "EDE option",
+			input: "0x8000 15 0006626f677573", // 15 EDE code 6 "bogus"
+			want:  NewRecordOPT(0, 0x8000, NewEDNSOptionEDE(6, "bogus")),
+		},
+		{
 			name:    "option code without data",
 			input:   "0x8000 DO 3",
 			want:    RecordOPT{},
@@ -205,6 +234,16 @@ func TestRecordOPT_String(t *testing.T) {
 			name: "options",
 			opt:  NewRecordOPT(0, 0, EDNSOptionDNSSEC{}, EDNSOptionNSID{ID: "CDEF"}),
 			want: "0000 DO NSID 43444546",
+		},
+		{
+			name: "EDE with extra text",
+			opt:  NewRecordOPT(0, 0x8000, NewEDNSOptionEDE(6, "bogus")),
+			want: `8000 EDE 6 "bogus"`,
+		},
+		{
+			name: "EDE without extra text",
+			opt:  NewRecordOPT(0, 0, NewEDNSOptionEDE(EDECodeStaleNXDOMAINAnswer, "")),
+			want: "0000 EDE 19",
 		},
 	}
 
@@ -298,6 +337,43 @@ func TestEDNSOptionNSID_RoundTrip(t *testing.T) {
 	}
 	if got.String() != "8000 NSID 65646e7378" {
 		t.Errorf("RecordOPT String() = %q, want %q", got.String(), "8000 NSID 65646e7378")
+	}
+}
+
+func TestEDNSOptionEDE_RoundTrip(t *testing.T) {
+	e := NewEDNSOptionEDE(EDECodeDNSSECBogus, "bogus RRSIG")
+
+	r := NewRecordOPT(EDNS0Version, EDNS0FlagDO, e)
+
+	w := new(WireFormat)
+	r.AppendWireFormat(w, NewNameCompressionDB())
+
+	got, pos, err := ParseRecordOPT(*w, 0, uint32(w.Size()))
+	if err != nil {
+		t.Fatalf("ParseRecordOPT() error = %v", err)
+	}
+	if pos != uint32(w.Size()) {
+		t.Fatalf("ParseRecordOPT() pos = %d, want %d", pos, w.Size())
+	}
+	if len(got.Options) != 1 {
+		t.Fatalf("parsed %d options, want 1", len(got.Options))
+	}
+
+	parsed, ok := got.Options[0].(EDNSOptionEDE)
+	if !ok {
+		t.Fatalf("option is %T, want EDNSOptionEDE", got.Options[0])
+	}
+	if parsed.ErrorCode != EDECodeDNSSECBogus {
+		t.Errorf("EDE ErrorCode = %d, want %d", parsed.ErrorCode, EDECodeDNSSECBogus)
+	}
+	if parsed.ExtraText != "bogus RRSIG" {
+		t.Errorf("EDE ExtraText = %q, want %q", parsed.ExtraText, "bogus RRSIG")
+	}
+	if s := parsed.String(); s != `EDE 6 "bogus RRSIG"` {
+		t.Errorf("EDE String() = %q, want %q", s, `EDE 6 "bogus RRSIG"`)
+	}
+	if got.String() != `8000 EDE 6 "bogus RRSIG"` {
+		t.Errorf("RecordOPT String() = %q, want %q", got.String(), `8000 EDE 6 "bogus RRSIG"`)
 	}
 }
 

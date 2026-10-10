@@ -1,6 +1,7 @@
 package dnsmsg
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"strconv"
@@ -70,6 +71,31 @@ func (o EDNSOptionNSID) String() string {
 	return "NSID " + hex.EncodeToString([]byte(o.ID))
 }
 
+// EDNSOptionEDE is the EDNS(0) Extended DNS Errors option (RFC 8914).
+// It carries a 16-bit INFO-CODE indexing the "Extended DNS Error
+// Codes" registry (RFC 8914 Section 4) and a variable-length UTF-8
+// EXTRA-TEXT providing additional context for the error.
+type EDNSOptionEDE struct {
+	ErrorCode uint16
+	ExtraText string
+}
+
+func (EDNSOptionEDE) Code() uint16 {
+	return EDNSOptionCodeEDE
+}
+func (o EDNSOptionEDE) Data() []byte {
+	w := new(WireFormat)
+	w.AppendUInt16(o.ErrorCode)
+	w.AppendBytes([]byte(o.ExtraText))
+	return *w
+}
+func (o EDNSOptionEDE) String() string {
+	if o.ExtraText == "" {
+		return fmt.Sprintf("EDE %d", o.ErrorCode)
+	}
+	return fmt.Sprintf("EDE %d %q", o.ErrorCode, o.ExtraText)
+}
+
 // EDNSOptionRaw is a generic EDNS(0) option for codes that have no
 // registered parser.  It preserves the option code and payload verbatim.
 type EDNSOptionRaw struct {
@@ -94,11 +120,42 @@ const EDNS0Version uint8 = 0
 // DNSSEC is acceptable for this client (RFC 3225).
 const EDNS0FlagDO uint16 = 0x8000
 
-// EDNS(0) option codes (RFCs 3225, 7873, 4635)
+// EDNS(0) option codes (RFCs 3225, 7873, 4635, 8914)
 const (
 	EDNSOptionCodeDNSSEC       uint16 = 1
 	EDNSOptionCodeNSID         uint16 = 3
 	EDNSOptionCodeClientSubnet uint16 = 8
+	EDNSOptionCodeEDE          uint16 = 15
+)
+
+// EDE error codes (RFC 8914 Section 4, the IANA "Extended DNS Error
+// Codes" registry).
+const (
+	EDECodeOther                      = 0
+	EDECodeUnsupportedDNSKEYAlgorithm = 1
+	EDECodeUnsupportedDSDigestType    = 2
+	EDECodeStaleAnswer                = 3
+	EDECodeForgedAnswer               = 4
+	EDECodeDNSSECIndeterminate        = 5
+	EDECodeDNSSECBogus                = 6
+	EDECodeSignatureExpired           = 7
+	EDECodeSignatureNotYetValid       = 8
+	EDECodeDNSKEYMissing              = 9
+	EDECodeRRSIGsMissing              = 10
+	EDECodeNoZoneKeyBitSet            = 11
+	EDECodeNSECMissing                = 12
+	EDECodeCachedError                = 13
+	EDECodeNotReady                   = 14
+	EDECodeBlocked                    = 15
+	EDECodeCensored                   = 16
+	EDECodeFiltered                   = 17
+	EDECodeProhibited                 = 18
+	EDECodeStaleNXDOMAINAnswer        = 19
+	EDECodeNotAuthoritative           = 20
+	EDECodeNotSupported               = 21
+	EDECodeNoReachableAuthority       = 22
+	EDECodeNetworkError               = 23
+	EDECodeInvalidData                = 24
 )
 
 func (r RecordOPT) Type() ResourceType {
@@ -160,6 +217,18 @@ func NewEDNSOptionNSID(nsid string) (EDNSOptionNSID, error) {
 	return EDNSOptionNSID{ID: nsid}, nil
 }
 
+// NewEDNSOptionEDE creates an EDNS extended DNS errors option
+// (RFC 8914) carrying the given 16-bit error code and (optionally
+// empty) UTF-8 extra text.  The error code should be one of the
+// EDECode* constants but any 16-bit value is accepted, matching
+// the permissive nature of the wire format.
+func NewEDNSOptionEDE(errorCode uint16, extraText string) EDNSOptionEDE {
+	return EDNSOptionEDE{
+		ErrorCode: errorCode,
+		ExtraText: extraText,
+	}
+}
+
 // ednsOptionParsers maps EDNS option codes to parsers that turn raw option
 // data into a typed EDNSOption.  Unknown codes fall back to an
 // EDNSOptionRaw.  The map is guarded by ednsOptionParsersMu so it can be
@@ -169,6 +238,17 @@ var (
 	ednsOptionParsers   = map[uint16]func(data []byte) EDNSOption{
 		EDNSOptionCodeDNSSEC: func(data []byte) EDNSOption { return EDNSOptionDNSSEC{} },
 		EDNSOptionCodeNSID:   func(data []byte) EDNSOption { return EDNSOptionNSID{ID: string(data)} },
+		EDNSOptionCodeEDE: func(data []byte) EDNSOption {
+			if len(data) < 2 {
+				// A well-formed EDE option needs the 2-byte INFO-CODE;
+				// fall back to the raw option for truncated payloads.
+				return EDNSOptionRaw{OptionCode: EDNSOptionCodeEDE, OptionData: data}
+			}
+			return EDNSOptionEDE{
+				ErrorCode: binary.BigEndian.Uint16(data[:2]),
+				ExtraText: string(data[2:]),
+			}
+		},
 	}
 )
 
