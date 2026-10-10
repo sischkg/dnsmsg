@@ -1,0 +1,62 @@
+// devcontainer.json — Go + git + OpenCode 開発環境
+//
+// 要件対応:
+//   - Go 1.23 開発環境（gopls 含む）: .devcontainer/Dockerfile
+//   - git / curl / wget による外部 Web アクセス: .devcontainer/Dockerfile
+//   - OpenCode (V2) CLI: .devcontainer/Dockerfile
+//   - OpenCode 設定を container 外（ホスト）から読み込む: 下の "mounts"
+{
+  "name": "dnsmsg (Go + OpenCode)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+
+  "remoteUser": "vscode",
+
+  // ホスト側の OpenCode 設定（グローバル設定・CLI 設定・認証情報）を
+  // コンテナ内の vscode ユーザーに bind mount して取得する。
+  //
+  //  - ~/.config/opencode      → opencode.json / cli.json など（設定）
+  //  - ~/.local/share/opencode → auth.json など（認証情報 / データ）
+  //
+  // 注意: ホスト側にディレクトリが存在しない場合は、先に
+  //       `mkdir -p ~/.config/opencode ~/.local/share/opencode`
+  //       を実行してください（存在しないとコンテナ起動時に mount が失敗する）。
+  "mounts": [
+    "source=${localEnv:HOME}/.config/opencode,target=/home/vscode/.config/opencode,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.local/share/opencode,target=/home/vscode/.local/share/opencode,type=bind,consistency=cached"
+  ],
+
+  "postCreateCommand": [
+    "go version",
+    "git --version",
+    "gopls version || /home/vscode/go/bin/gopls version",
+    "opencode --version",
+    "curl -fsS https://example.com -o /dev/null && echo 'curl: OK'",
+    "wget -q -O /dev/null https://example.com && echo 'wget: OK'",
+    "echo '--- mounted opencode config ---'",
+    "ls -la /home/vscode/.config/opencode"
+  ],
+
+  // VS Code の Go 開発拡張
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "golang.go"
+      ]
+    }
+  },
+
+  // OpenCode Web UI / `opencode pair` のデフォルトポート
+  "forwardPorts": [4096],
+
+  "portsAttributes": {
+    "4096": {
+      "label": "OpenCode Web"
+    }
+  },
+
+  "containerEnv": {
+    "GOPATH": "/home/vscode/go"
+  }
+}
