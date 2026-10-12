@@ -189,7 +189,7 @@ func TestRecordSOAString(t *testing.T) {
 		{
 			name:  "root domain",
 			input: NewRecordSOA(NewRootDomainName(), NewRootDomainName(), 1, 0, 0, 0, 0),
-			want:  "  1 0 0 0 0",
+			want:  ". . 1 0 0 0 0",
 		},
 	}
 

@@ -129,7 +129,7 @@ func TestRecordNSString(t *testing.T) {
 		{
 			name:  "root domain",
 			input: NewRecordNS(NewRootDomainName()),
-			want:  "",
+			want:  ".",
 		},
 	}
 

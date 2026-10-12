@@ -278,7 +278,7 @@ func TestRecordRRSIGString(t *testing.T) {
 		{
 			name:  "RRSIG with root signers name",
 			input: NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, NewRootDomainName(), []byte{0xDE, 0xAD, 0xBE, 0xEF}),
-			want:  "SOA 5 1 600 1700000000 1690000000 256  3q2+7w",
+			want:  "SOA 5 1 600 1700000000 1690000000 256 . 3q2+7w",
 		},
 	}
 

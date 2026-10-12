@@ -395,8 +395,8 @@ func TestNewRootDomainName(t *testing.T) {
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("NewRootDomainName() = %v, want %v", got, want)
 	}
-	if got.String() != "" {
-		t.Errorf("NewRootDomainName().String() = %q, want \"\"", got.String())
+	if got.String() != "." {
+		t.Errorf("NewRootDomainName().String() = %q, want \".\"", got.String())
 	}
 }
 
@@ -830,7 +830,7 @@ func TestDomainNameString(t *testing.T) {
 		{
 			name:  "root domain",
 			input: DomainName{labels: []Label{{data: []byte{}}}},
-			want:  "",
+			want:  ".",
 		},
 		{
 			name: "single label",
@@ -1177,7 +1177,7 @@ func TestDomainNameParentDomainNames(t *testing.T) {
 
 			// The root domain (".") must not appear among the parents.
 			for i, p := range got {
-				if p.String() == "" {
+				if p.String() == "." {
 					t.Errorf("DomainName.ParentDomainNames()[%d] is the root domain, want non-root", i)
 				}
 			}

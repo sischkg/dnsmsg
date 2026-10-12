@@ -277,10 +277,12 @@ func newDomainNameFromLabels(labels [][]byte) (DomainName, error) {
 }
 
 // String returns the presentation form of the domain name: the labels
-// joined by '.', with the trailing root label printing nothing (so the
-// root domain prints as the empty string and the singleton "com" as
-// "com.").
+// joined by '.', with the trailing root label printing as the final '.'
+// (so the root domain prints as "." and the singleton "com" as "com.").
 func (d DomainName) String() string {
+	if d.IsRoot() {
+		return "."
+	}
 	labels := []string{}
 	for _, l := range d.labels {
 		labels = append(labels, l.String())
