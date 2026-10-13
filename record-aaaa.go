@@ -1,6 +1,7 @@
 package dnsmsg
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
 )
@@ -41,6 +42,14 @@ func NewRecordAAAAFromString(addr string) (record RecordAAAA, err error) {
 	}
 	record.address = ip.As16()
 	return
+}
+
+// MarshalJSON encodes the record as a JSON object.  The address is
+// encoded as its presentation-format string (RFC 4208 IPv6 text).
+func (aaaa RecordAAAA) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"address": aaaa.String(),
+	})
 }
 
 func NewRecordAAAA(addr [16]byte) (record RecordAAAA) {

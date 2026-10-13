@@ -3,6 +3,7 @@ package dnsmsg
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -54,6 +55,11 @@ func (EDNSOptionDNSSEC) Data() []byte {
 func (EDNSOptionDNSSEC) String() string {
 	return "DO"
 }
+func (EDNSOptionDNSSEC) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"Code": EDNSOptionCodeDNSSEC,
+	})
+}
 
 // EDNSOptionNSID is the EDNS(0) Name Server ID option (RFC 7873) carrying
 // an opaque identifier for the name server.
@@ -69,6 +75,12 @@ func (o EDNSOptionNSID) Data() []byte {
 }
 func (o EDNSOptionNSID) String() string {
 	return "NSID " + hex.EncodeToString([]byte(o.ID))
+}
+func (o EDNSOptionNSID) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"Code": EDNSOptionCodeNSID,
+		"ID":   o.ID,
+	})
 }
 
 // EDNSOptionEDE is the EDNS(0) Extended DNS Errors option (RFC 8914).
@@ -95,6 +107,13 @@ func (o EDNSOptionEDE) String() string {
 	}
 	return fmt.Sprintf("EDE %d %q", o.ErrorCode, o.ExtraText)
 }
+func (o EDNSOptionEDE) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"Code":      EDNSOptionCodeEDE,
+		"ErrorCode": o.ErrorCode,
+		"ExtraText": o.ExtraText,
+	})
+}
 
 // EDNSOptionRaw is a generic EDNS(0) option for codes that have no
 // registered parser.  It preserves the option code and payload verbatim.
@@ -111,6 +130,12 @@ func (o EDNSOptionRaw) Data() []byte {
 }
 func (o EDNSOptionRaw) String() string {
 	return fmt.Sprintf("%d %s", o.OptionCode, hex.EncodeToString(o.OptionData))
+}
+func (o EDNSOptionRaw) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"Code":       o.OptionCode,
+		"OptionData": hex.EncodeToString(o.OptionData),
+	})
 }
 
 // EDNS0 version (RFC 6891)
@@ -191,6 +216,16 @@ func (r RecordOPT) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32
 
 func (r RecordOPT) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 	return r.AppendWireFormat(w, nil)
+}
+
+// MarshalJSON encodes the record as a JSON object.  Each EDNS option is
+// encoded via the concrete option type's own MarshalJSON.
+func (r RecordOPT) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"Version": r.Version,
+		"Flags":   r.Flags,
+		"Options": r.Options,
+	})
 }
 
 // NewRecordOPT creates a new RecordOPT from structured values

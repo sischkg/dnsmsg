@@ -1,6 +1,7 @@
 package dnsmsg
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
 )
@@ -41,6 +42,14 @@ func NewRecordAFromString(addr string) (address RecordA, err error) {
 	address.address = a.As4()
 	err = nil
 	return
+}
+
+// MarshalJSON encodes the record as a JSON object.  The IPv4 address is
+// encoded as its presentation-format string (dotted-quad).
+func (a RecordA) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"address": a.String(),
+	})
 }
 
 func NewRecordA(addr [4]byte) (address RecordA) {

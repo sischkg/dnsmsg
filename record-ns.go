@@ -1,5 +1,7 @@
 package dnsmsg
 
+import "encoding/json"
+
 type RecordNS struct {
 	nsname DomainName
 }
@@ -34,6 +36,14 @@ func NewRecordNSFromString(n string) (ns RecordNS, err error) {
 		return
 	}
 	return NewRecordNS(name), nil
+}
+
+// MarshalJSON encodes the record as a JSON object.  The nameserver name
+// is encoded as its presentation-format string.
+func (ns RecordNS) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"nsname": ns.nsname,
+	})
 }
 
 func NewRecordNS(n DomainName) (ns RecordNS) {

@@ -2,6 +2,7 @@ package dnsmsg
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
@@ -288,6 +289,11 @@ func (d DomainName) String() string {
 		labels = append(labels, l.String())
 	}
 	return strings.Join(labels, ".")
+}
+
+// MarshalJSON encodes the domain name as its presentation-format string.
+func (d DomainName) MarshalJSON() ([]byte, error) {
+	return json.Marshal(d.String())
 }
 
 // AppendLabel adds a label to the domain name. The receiver must be

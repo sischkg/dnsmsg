@@ -1,6 +1,7 @@
 package dnsmsg
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -103,6 +104,21 @@ func NewRecordSOAFromString(s string) (soa RecordSOA, err error) {
 	soa = NewRecordSOA(mname, rname, uint32(serial), uint32(refresh), uint32(retry), uint32(expire), uint32(minimum))
 	err = nil
 	return
+}
+
+// MarshalJSON encodes the record as a JSON object.  The management and
+// owner names are encoded as presentation-format strings and the timer
+// fields as numbers.
+func (soa RecordSOA) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"mname":   soa.mname,
+		"rname":   soa.rname,
+		"serial":  soa.serial,
+		"refresh": soa.refresh,
+		"retry":   soa.retry,
+		"expire":  soa.expire,
+		"minimum": soa.minimum,
+	})
 }
 
 func NewRecordSOA(mname, rname DomainName, serial, refresh, retry, expire, minimum uint32) (soa RecordSOA) {

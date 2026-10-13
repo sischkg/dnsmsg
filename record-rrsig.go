@@ -1,6 +1,7 @@
 package dnsmsg
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -69,6 +70,23 @@ func (r RecordRRSIG) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 	size += w.AppendCanonicalDomainName(r.SignersName)
 	size += w.AppendBytes(r.Signature)
 	return size
+}
+
+// MarshalJSON encodes the record as a JSON object.  The covered type is
+// encoded as a resource type name, the signer's name as a presentation
+// format string, and the signature as a base64 string.
+func (r RecordRRSIG) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"TypeCovered": ResourceType(r.TypeCovered).String(),
+		"Algorithm":   r.Algorithm,
+		"Labels":      r.Labels,
+		"OrigTTL":     r.OrigTTL,
+		"Expiration":  r.Expiration,
+		"Inception":   r.Inception,
+		"KeyTag":      r.KeyTag,
+		"SignersName": r.SignersName,
+		"Signature":   encodeBase64(r.Signature),
+	})
 }
 
 // NewRecordRRSIG creates a new RecordRRSIG from structured values

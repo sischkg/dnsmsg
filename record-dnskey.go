@@ -1,6 +1,7 @@
 package dnsmsg
 
 import (
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -39,6 +40,17 @@ func (r RecordDNSKEY) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uin
 
 func (r RecordDNSKEY) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 	return r.AppendWireFormat(w, nil)
+}
+
+// MarshalJSON encodes the record as a JSON object.  The public key is
+// encoded as a base64 string.
+func (r RecordDNSKEY) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"Flags":     r.Flags,
+		"Protocol":  r.Protocol,
+		"Algorithm": r.Algorithm,
+		"PublicKey": encodeBase64(r.PublicKey),
+	})
 }
 
 // NewRecordDNSKEY creates a new RecordDNSKEY from structured values

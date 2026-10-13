@@ -3,6 +3,7 @@ package dnsmsg
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"net"
 	"regexp"
@@ -164,6 +165,17 @@ func (q QuestionSectionEntry) String() string {
 	return fmt.Sprintf("%s %s %s", q.QName.String(), q.Class.String(), q.Type.String())
 }
 
+// MarshalJSON encodes the question section entry as a JSON object.  Domain
+// names, resource classes, and resource types are encoded as their
+// presentation-format strings.
+func (q QuestionSectionEntry) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"QName": q.QName,
+		"Class": q.Class.String(),
+		"Type":  q.Type.String(),
+	})
+}
+
 func AppendQuestionSectionEntry(w *WireFormat, q QuestionSectionEntry, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
 	size += w.AppendDomainName(q.QName, db)
@@ -220,6 +232,20 @@ func (rr ResourceRecord) String() string {
 	w := new(bytes.Buffer)
 	fmt.Fprintf(w, "%s %d %d %d %s", rr.Name.String(), rr.Class, rr.Type, rr.TTL, rr.RData.String())
 	return w.String()
+}
+
+// MarshalJSON encodes the resource record as a JSON object.  The record
+// name is encoded as its presentation-format string, the resource class
+// and type as their names, and the RDATA via the concrete record type's
+// own MarshalJSON.
+func (rr ResourceRecord) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"Name":  rr.Name,
+		"Class": rr.Class.String(),
+		"Type":  rr.Type.String(),
+		"TTL":   rr.TTL,
+		"RData": rr.RData,
+	})
 }
 
 func AppendResourceRecord(w *WireFormat, rr ResourceRecord, db *NameCompressionDB) uint32 {
@@ -331,6 +357,36 @@ func (msg Message) String() string {
 		str += fmt.Sprintf("%s\n", a.String())
 	}
 	return str
+}
+
+// MarshalJSON encodes the message as a JSON object: the header fields and
+// all four sections.  The count fields are exported as stored, not derived
+// from the section lengths.  A section that is not present (a nil slice) is
+// exported as null.
+func (msg Message) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"ID":     msg.ID,
+		"QR":     msg.QR,
+		"OPCODE": msg.OPCODE,
+		"AA":     msg.AA,
+		"TC":     msg.TC,
+		"RD":     msg.RD,
+		"RA":     msg.RA,
+		"Z":      msg.Z,
+		"AD":     msg.AD,
+		"CD":     msg.CD,
+		"RCODE":  msg.RCODE,
+
+		"QDCOUNT":         msg.QDCOUNT,
+		"ANCOUNT":         msg.ANCOUNT,
+		"NSCOUNT":         msg.NSCOUNT,
+		"ARCOUNT":         msg.ARCOUNT,
+
+		"QuestionSection":   msg.QuestionSection,
+		"AnswerSection":     msg.AnswerSection,
+		"AuthoritySection":  msg.AuthoritySection,
+		"AdditionalSection": msg.AdditionalSection,
+	})
 }
 
 func (msg *Message) SetQuery(qname string, qclass ResourceClass, qtype ResourceType) error {

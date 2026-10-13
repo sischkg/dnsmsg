@@ -1,6 +1,8 @@
 package dnsmsg
 
 import (
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -51,6 +53,18 @@ func (r RecordDS) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 
 
 func (r RecordDS) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 	return r.AppendWireFormat(w, nil)
+}
+
+// MarshalJSON encodes the record as a JSON object.  The delegation
+// digest is encoded as a lower-case hexadecimal string, matching the
+// presentation format.
+func (r RecordDS) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"KeyTag":     r.KeyTag,
+		"Algorithm":  r.Algorithm,
+		"DigestType": r.DigestType,
+		"Digest":     hex.EncodeToString(r.Digest),
+	})
 }
 
 // NewRecordDS creates a new RecordDS from structured values

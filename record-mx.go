@@ -1,6 +1,7 @@
 package dnsmsg
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -38,6 +39,15 @@ func (r RecordMX) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 	size += w.AppendUInt16(r.Preference)
 	size += w.AppendCanonicalDomainName(r.Exchange)
 	return size
+}
+
+// MarshalJSON encodes the record as a JSON object.  The exchange name is
+// encoded as its presentation-format string.
+func (r RecordMX) MarshalJSON() ([]byte, error) {
+	return json.Marshal(map[string]any{
+		"Preference": r.Preference,
+		"Exchange":   r.Exchange,
+	})
 }
 
 // NewRecordMX creates a new RecordMX from structured values
