@@ -35,6 +35,23 @@ func (w *WireFormat) AppendUInt32(v uint32) uint32 {
 	return 4
 }
 
+// AppendUInt48 appends v as six octets, most significant byte first.
+// Only the low 48 bits of v are written.
+func (w *WireFormat) AppendUInt48(v uint64) uint32 {
+	if w == nil {
+		return 0
+	}
+	*w = append(*w,
+		byte(v>>40),
+		byte(v>>32),
+		byte(v>>24),
+		byte(v>>16),
+		byte(v>>8),
+		byte(v),
+	)
+	return 6
+}
+
 func (w *WireFormat) AppendBytes(v []byte) uint32 {
 	if w == nil {
 		return 0
@@ -138,6 +155,17 @@ func (w WireFormat) GetUInt32(i uint32) (v uint32, e error) {
 		return 0, fmt.Errorf("out of bound access")
 	}
 	v = (uint32(w[i]) << 24) | (uint32(w[i+1]) << 16) | (uint32(w[i+2]) << 8) | uint32(w[i+3])
+	return v, nil
+}
+
+// GetUInt48 reads six octets starting at i as an unsigned 48-bit integer,
+// most significant byte first.
+func (w WireFormat) GetUInt48(i uint32) (v uint64, e error) {
+	if uint64(i)+6 > uint64(len(w)) {
+		return 0, fmt.Errorf("out of bound access")
+	}
+	v = (uint64(w[i]) << 40) | (uint64(w[i+1]) << 32) | (uint64(w[i+2]) << 24) |
+		(uint64(w[i+3]) << 16) | (uint64(w[i+4]) << 8) | uint64(w[i+5])
 	return v, nil
 }
 

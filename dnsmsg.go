@@ -57,6 +57,7 @@ const (
 	TYPE_OPT    ResourceType = 41
 	TYPE_RRSIG  ResourceType = 46
 	TYPE_DNSKEY ResourceType = 48
+	TYPE_TSIG   ResourceType = 250
 )
 
 func (t ResourceType) String() string {
@@ -79,6 +80,8 @@ func (t ResourceType) String() string {
 		return "RRSIG"
 	case TYPE_DNSKEY:
 		return "DNSKEY"
+	case TYPE_TSIG:
+		return "TSIG"
 	default:
 		return fmt.Sprintf("TYPE%d", t)
 	}
@@ -110,6 +113,8 @@ func NewType(s string) (ResourceType, error) {
 		return TYPE_RRSIG, nil
 	case "DNSKEY":
 		return TYPE_DNSKEY, nil
+	case "TSIG":
+		return TYPE_TSIG, nil
 	default:
 		return 0, fmt.Errorf(`unknown resource type "%s"`, s)
 	}
@@ -121,6 +126,7 @@ const (
 	CLASS_IN     ResourceClass = 1
 	CLASS_CHAOS  ResourceClass = 3
 	CLASS_HESIOD ResourceClass = 4
+	CLASS_ANY    ResourceClass = 255
 )
 
 func (c ResourceClass) String() string {
@@ -131,6 +137,8 @@ func (c ResourceClass) String() string {
 		return "CH"
 	case CLASS_HESIOD:
 		return "HS"
+	case CLASS_ANY:
+		return "ANY"
 	default:
 		return fmt.Sprintf("CLASS%d", c)
 	}
@@ -150,6 +158,8 @@ func NewClass(s string) (ResourceClass, error) {
 		return CLASS_CHAOS, nil
 	case "HS":
 		return CLASS_HESIOD, nil
+	case "ANY":
+		return CLASS_ANY, nil
 	default:
 		return 0, fmt.Errorf(`unknown resource class "%s"`, s)
 	}
@@ -442,6 +452,8 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 		rr.RData, _, err = ParseRecordRRSIG(w, p, end)
 	case TYPE_DNSKEY:
 		rr.RData, _, err = ParseRecordDNSKEY(w, p, end)
+	case TYPE_TSIG:
+		rr.RData, _, err = ParseRecordTSIG(w, p, end)
 	default:
 		rr.RData, _, err = ParseRecordRaw(w, p, end, rr.Type)
 	}
