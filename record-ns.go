@@ -1,6 +1,9 @@
 package dnsmsg
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 type RecordNS struct {
 	nsname DomainName
@@ -44,6 +47,19 @@ func (ns RecordNS) MarshalJSON() ([]byte, error) {
 	return json.Marshal(map[string]any{
 		"nsname": ns.nsname,
 	})
+}
+
+// UnmarshalJSON decodes the record from the JSON object MarshalJSON
+// produces, taking the nameserver name from its presentation-format string.
+func (ns *RecordNS) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		NSName DomainName `json:"nsname"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse NS record: %w", err)
+	}
+	ns.nsname = fields.NSName
+	return nil
 }
 
 func NewRecordNS(n DomainName) (ns RecordNS) {

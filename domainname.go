@@ -296,6 +296,21 @@ func (d DomainName) MarshalJSON() ([]byte, error) {
 	return json.Marshal(d.String())
 }
 
+// UnmarshalJSON decodes a domain name from its presentation-format string,
+// which is the form MarshalJSON produces.
+func (d *DomainName) UnmarshalJSON(data []byte) error {
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return fmt.Errorf("cannot parse domain name: %w", err)
+	}
+	name, err := NewDomainNameFromString(s)
+	if err != nil {
+		return fmt.Errorf("invalid domain name %q: %w", s, err)
+	}
+	*d = name
+	return nil
+}
+
 // AppendLabel adds a label to the domain name. The receiver must be
 // terminated by the root label. The new label is inserted just before the
 // root label, replacing it, and a fresh root label is appended after it, so

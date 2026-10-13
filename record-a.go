@@ -52,6 +52,23 @@ func (a RecordA) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the record from the JSON object MarshalJSON
+// produces, taking the address from its presentation-format string.
+func (a *RecordA) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Address string `json:"address"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse A record: %w", err)
+	}
+	rec, err := NewRecordAFromString(fields.Address)
+	if err != nil {
+		return err
+	}
+	*a = rec
+	return nil
+}
+
 func NewRecordA(addr [4]byte) (address RecordA) {
 	address.address = addr
 	return

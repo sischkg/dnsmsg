@@ -176,6 +176,65 @@ func (q QuestionSectionEntry) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes a question section entry from the JSON object
+// MarshalJSON produces.  The class and type also accept their numeric codes.
+func (q *QuestionSectionEntry) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		QName DomainName      `json:"QName"`
+		Class json.RawMessage `json:"Class"`
+		Type  json.RawMessage `json:"Type"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse question section entry: %w", err)
+	}
+	class, err := decodeResourceClass(fields.Class)
+	if err != nil {
+		return err
+	}
+	rtyp, err := decodeResourceType(fields.Type)
+	if err != nil {
+		return err
+	}
+	q.QName = fields.QName
+	q.Class = class
+	q.Type = rtyp
+	return nil
+}
+
+// decodeResourceClass decodes a resource class from its name string ("IN",
+// "CLASS42") or its numeric code.
+func decodeResourceClass(data json.RawMessage) (ResourceClass, error) {
+	if len(data) == 0 {
+		return 0, fmt.Errorf("missing resource class")
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		return NewClass(s)
+	}
+	var n uint16
+	if err := json.Unmarshal(data, &n); err != nil {
+		return 0, fmt.Errorf("invalid resource class %s", data)
+	}
+	return ResourceClass(n), nil
+}
+
+// decodeResourceType decodes a resource type from its name string ("A",
+// "TYPE100") or its numeric code.
+func decodeResourceType(data json.RawMessage) (ResourceType, error) {
+	if len(data) == 0 {
+		return 0, fmt.Errorf("missing resource type")
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		return NewType(s)
+	}
+	var n uint16
+	if err := json.Unmarshal(data, &n); err != nil {
+		return 0, fmt.Errorf("invalid resource type %s", data)
+	}
+	return ResourceType(n), nil
+}
+
 func AppendQuestionSectionEntry(w *WireFormat, q QuestionSectionEntry, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
 	size += w.AppendDomainName(q.QName, db)
@@ -246,6 +305,84 @@ func (rr ResourceRecord) MarshalJSON() ([]byte, error) {
 		"TTL":   rr.TTL,
 		"RData": rr.RData,
 	})
+}
+
+// UnmarshalJSON decodes a resource record from the JSON object MarshalJSON
+// produces.  The RDATA is decoded into the concrete record type selected by
+// the record type; types the library does not interpret are decoded as
+// RecordRaw.  The class and type also accept their numeric codes.
+func (rr *ResourceRecord) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Name  DomainName      `json:"Name"`
+		Class json.RawMessage `json:"Class"`
+		Type  json.RawMessage `json:"Type"`
+		TTL   uint32          `json:"TTL"`
+		RData json.RawMessage `json:"RData"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse resource record: %w", err)
+	}
+	class, err := decodeResourceClass(fields.Class)
+	if err != nil {
+		return err
+	}
+	rtyp, err := decodeResourceType(fields.Type)
+	if err != nil {
+		return err
+	}
+	rr.Name = fields.Name
+	rr.Class = class
+	rr.Type = rtyp
+	rr.TTL = fields.TTL
+	return rr.unmarshalRData(fields.RData)
+}
+
+// unmarshalRData decodes the RDATA of a record whose Type is already set,
+// mirroring the dispatch of ParseResourceRecord.  A null or absent RDATA
+// leaves RData nil.
+func (rr *ResourceRecord) unmarshalRData(data json.RawMessage) error {
+	if len(data) == 0 || string(data) == "null" {
+		rr.RData = nil
+		return nil
+	}
+
+	var rdata RDATA
+	switch rr.Type {
+	case TYPE_A:
+		rdata = new(RecordA)
+	case TYPE_NS:
+		rdata = new(RecordNS)
+	case TYPE_MX:
+		rdata = new(RecordMX)
+	case TYPE_SOA:
+		rdata = new(RecordSOA)
+	case TYPE_AAAA:
+		rdata = new(RecordAAAA)
+	case TYPE_DS:
+		rdata = new(RecordDS)
+	case TYPE_OPT:
+		rdata = new(RecordOPT)
+	case TYPE_RRSIG:
+		rdata = new(RecordRRSIG)
+	case TYPE_DNSKEY:
+		rdata = new(RecordDNSKEY)
+	default:
+		raw := new(RecordRaw)
+		if err := json.Unmarshal(data, raw); err != nil {
+			return fmt.Errorf("cannot parse %s RDATA: %w", rr.Type.String(), err)
+		}
+		// The record's own type is authoritative over the copy embedded in
+		// the raw RDATA.
+		raw.rtype = rr.Type
+		rr.RData = raw
+		return nil
+	}
+
+	if err := json.Unmarshal(data, rdata); err != nil {
+		return fmt.Errorf("cannot parse %s RDATA: %w", rr.Type.String(), err)
+	}
+	rr.RData = rdata
+	return nil
 }
 
 func AppendResourceRecord(w *WireFormat, rr ResourceRecord, db *NameCompressionDB) uint32 {
@@ -377,16 +514,73 @@ func (msg Message) MarshalJSON() ([]byte, error) {
 		"CD":     msg.CD,
 		"RCODE":  msg.RCODE,
 
-		"QDCOUNT":         msg.QDCOUNT,
-		"ANCOUNT":         msg.ANCOUNT,
-		"NSCOUNT":         msg.NSCOUNT,
-		"ARCOUNT":         msg.ARCOUNT,
+		"QDCOUNT": msg.QDCOUNT,
+		"ANCOUNT": msg.ANCOUNT,
+		"NSCOUNT": msg.NSCOUNT,
+		"ARCOUNT": msg.ARCOUNT,
 
 		"QuestionSection":   msg.QuestionSection,
 		"AnswerSection":     msg.AnswerSection,
 		"AuthoritySection":  msg.AuthoritySection,
 		"AdditionalSection": msg.AdditionalSection,
 	})
+}
+
+// UnmarshalJSON decodes a message from the JSON object MarshalJSON produces:
+// the header fields and all four sections.  The count fields are taken from
+// the JSON as given, and a section that is null in the JSON is decoded as a
+// nil slice.
+func (msg *Message) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		ID     uint16 `json:"ID"`
+		QR     uint8  `json:"QR"`
+		OPCODE uint8  `json:"OPCODE"`
+		AA     uint8  `json:"AA"`
+		TC     uint8  `json:"TC"`
+		RD     uint8  `json:"RD"`
+		RA     uint8  `json:"RA"`
+		Z      uint8  `json:"Z"`
+		AD     uint8  `json:"AD"`
+		CD     uint8  `json:"CD"`
+		RCODE  uint8  `json:"RCODE"`
+
+		QDCOUNT uint16 `json:"QDCOUNT"`
+		ANCOUNT uint16 `json:"ANCOUNT"`
+		NSCOUNT uint16 `json:"NSCOUNT"`
+		ARCOUNT uint16 `json:"ARCOUNT"`
+
+		QuestionSection   []QuestionSectionEntry `json:"QuestionSection"`
+		AnswerSection     []ResourceRecord       `json:"AnswerSection"`
+		AuthoritySection  []ResourceRecord       `json:"AuthoritySection"`
+		AdditionalSection []ResourceRecord       `json:"AdditionalSection"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse message: %w", err)
+	}
+	*msg = Message{
+		ID:     fields.ID,
+		QR:     fields.QR,
+		OPCODE: fields.OPCODE,
+		AA:     fields.AA,
+		TC:     fields.TC,
+		RD:     fields.RD,
+		RA:     fields.RA,
+		Z:      fields.Z,
+		AD:     fields.AD,
+		CD:     fields.CD,
+		RCODE:  fields.RCODE,
+
+		QDCOUNT: fields.QDCOUNT,
+		ANCOUNT: fields.ANCOUNT,
+		NSCOUNT: fields.NSCOUNT,
+		ARCOUNT: fields.ARCOUNT,
+
+		QuestionSection:   fields.QuestionSection,
+		AnswerSection:     fields.AnswerSection,
+		AuthoritySection:  fields.AuthoritySection,
+		AdditionalSection: fields.AdditionalSection,
+	}
+	return nil
 }
 
 func (msg *Message) SetQuery(qname string, qclass ResourceClass, qtype ResourceType) error {

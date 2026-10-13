@@ -67,6 +67,31 @@ func (r RecordDS) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the record from the JSON object MarshalJSON
+// produces, taking the delegation digest from its hexadecimal string.
+func (r *RecordDS) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		KeyTag     uint16 `json:"KeyTag"`
+		Algorithm  uint8  `json:"Algorithm"`
+		DigestType uint8  `json:"DigestType"`
+		Digest     string `json:"Digest"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse DS record: %w", err)
+	}
+	digest, err := hex.DecodeString(fields.Digest)
+	if err != nil {
+		return fmt.Errorf("invalid DS digest %q: %w", fields.Digest, err)
+	}
+	*r = RecordDS{
+		KeyTag:     fields.KeyTag,
+		Algorithm:  fields.Algorithm,
+		DigestType: fields.DigestType,
+		Digest:     digest,
+	}
+	return nil
+}
+
 // NewRecordDS creates a new RecordDS from structured values
 func NewRecordDS(keyTag uint16, algorithm uint8, digestType uint8, digest []byte) RecordDS {
 	return RecordDS{

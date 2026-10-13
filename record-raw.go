@@ -39,8 +39,37 @@ func (a RecordRaw) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the record from the JSON object MarshalJSON
+// produces, taking the raw RDATA from its base64 string and the record
+// type from its type name.  When the record is decoded as part of a
+// ResourceRecord the enclosing record type takes precedence.
+func (a *RecordRaw) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Data  string          `json:"Data"`
+		RType json.RawMessage `json:"rtype"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse raw record: %w", err)
+	}
+	rawData, err := decodeBase64(fields.Data)
+	if err != nil {
+		return fmt.Errorf("invalid raw record data: %w", err)
+	}
+	rtype := ResourceType(0)
+	if len(fields.RType) != 0 {
+		rtype, err = decodeResourceType(fields.RType)
+		if err != nil {
+			return fmt.Errorf("invalid raw record type: %w", err)
+		}
+	}
+	a.Data = rawData
+	a.rtype = rtype
+	return nil
+}
+
 func NewRecordRaw(rtype ResourceType, data []byte) (r RecordRaw) {
 	r.Data = data
+	r.rtype = rtype
 	return
 }
 

@@ -53,6 +53,31 @@ func (r RecordDNSKEY) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the record from the JSON object MarshalJSON
+// produces, taking the public key from its base64 string.
+func (r *RecordDNSKEY) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Flags     uint16 `json:"Flags"`
+		Protocol  uint8  `json:"Protocol"`
+		Algorithm uint8  `json:"Algorithm"`
+		PublicKey string `json:"PublicKey"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse DNSKEY record: %w", err)
+	}
+	publicKey, err := decodeBase64(fields.PublicKey)
+	if err != nil {
+		return fmt.Errorf("invalid DNSKEY public key: %w", err)
+	}
+	*r = RecordDNSKEY{
+		Flags:     fields.Flags,
+		Protocol:  fields.Protocol,
+		Algorithm: fields.Algorithm,
+		PublicKey: publicKey,
+	}
+	return nil
+}
+
 // NewRecordDNSKEY creates a new RecordDNSKEY from structured values
 func NewRecordDNSKEY(flags uint16, protocol uint8, algorithm uint8, publicKey []byte) RecordDNSKEY {
 	return RecordDNSKEY{

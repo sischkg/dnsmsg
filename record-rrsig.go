@@ -89,6 +89,47 @@ func (r RecordRRSIG) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the record from the JSON object MarshalJSON
+// produces.  The covered type is accepted as a resource type name or a
+// number, the signer's name as a presentation format string and the
+// signature as a base64 string.
+func (r *RecordRRSIG) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		TypeCovered json.RawMessage `json:"TypeCovered"`
+		Algorithm   uint8           `json:"Algorithm"`
+		Labels      uint8           `json:"Labels"`
+		OrigTTL     uint32          `json:"OrigTTL"`
+		Expiration  uint32          `json:"Expiration"`
+		Inception   uint32          `json:"Inception"`
+		KeyTag      uint16          `json:"KeyTag"`
+		SignersName DomainName      `json:"SignersName"`
+		Signature   string          `json:"Signature"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse RRSIG record: %w", err)
+	}
+	typeCovered, err := decodeResourceType(fields.TypeCovered)
+	if err != nil {
+		return fmt.Errorf("invalid RRSIG covered type: %w", err)
+	}
+	signature, err := decodeBase64(fields.Signature)
+	if err != nil {
+		return fmt.Errorf("invalid RRSIG signature: %w", err)
+	}
+	*r = RecordRRSIG{
+		TypeCovered: uint16(typeCovered),
+		Algorithm:   fields.Algorithm,
+		Labels:      fields.Labels,
+		OrigTTL:     fields.OrigTTL,
+		Expiration:  fields.Expiration,
+		Inception:   fields.Inception,
+		KeyTag:      fields.KeyTag,
+		SignersName: fields.SignersName,
+		Signature:   signature,
+	}
+	return nil
+}
+
 // NewRecordRRSIG creates a new RecordRRSIG from structured values
 func NewRecordRRSIG(typeCovered uint16, algorithm uint8, labels uint8, origTTL uint32,
 	expiration uint32, inception uint32, keyTag uint16, signersName DomainName, signature []byte) RecordRRSIG {

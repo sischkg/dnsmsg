@@ -121,6 +121,34 @@ func (soa RecordSOA) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the record from the JSON object MarshalJSON
+// produces, taking the management and owner names from their
+// presentation-format strings and the timer fields as numbers.
+func (soa *RecordSOA) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		MName   DomainName `json:"mname"`
+		RName   DomainName `json:"rname"`
+		Serial  uint32     `json:"serial"`
+		Refresh uint32     `json:"refresh"`
+		Retry   uint32     `json:"retry"`
+		Expire  uint32     `json:"expire"`
+		Minimum uint32     `json:"minimum"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse SOA record: %w", err)
+	}
+	*soa = RecordSOA{
+		mname:   fields.MName,
+		rname:   fields.RName,
+		serial:  fields.Serial,
+		refresh: fields.Refresh,
+		retry:   fields.Retry,
+		expire:  fields.Expire,
+		minimum: fields.Minimum,
+	}
+	return nil
+}
+
 func NewRecordSOA(mname, rname DomainName, serial, refresh, retry, expire, minimum uint32) (soa RecordSOA) {
 	soa.mname = mname
 	soa.rname = rname

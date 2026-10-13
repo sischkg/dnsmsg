@@ -61,6 +61,17 @@ func (EDNSOptionDNSSEC) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the option from the JSON object MarshalJSON
+// produces.  The option carries no payload, so only the object form is
+// accepted.
+func (o *EDNSOptionDNSSEC) UnmarshalJSON(data []byte) error {
+	var fields struct{}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse DNSSEC EDNS option: %w", err)
+	}
+	return nil
+}
+
 // EDNSOptionNSID is the EDNS(0) Name Server ID option (RFC 7873) carrying
 // an opaque identifier for the name server.
 type EDNSOptionNSID struct {
@@ -81,6 +92,19 @@ func (o EDNSOptionNSID) MarshalJSON() ([]byte, error) {
 		"Code": EDNSOptionCodeNSID,
 		"ID":   o.ID,
 	})
+}
+
+// UnmarshalJSON decodes the option from the JSON object MarshalJSON
+// produces, taking the identifier as a string.
+func (o *EDNSOptionNSID) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		ID string `json:"ID"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse NSID EDNS option: %w", err)
+	}
+	o.ID = fields.ID
+	return nil
 }
 
 // EDNSOptionEDE is the EDNS(0) Extended DNS Errors option (RFC 8914).
@@ -115,6 +139,21 @@ func (o EDNSOptionEDE) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the option from the JSON object MarshalJSON
+// produces.
+func (o *EDNSOptionEDE) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		ErrorCode uint16 `json:"ErrorCode"`
+		ExtraText string `json:"ExtraText"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse EDE EDNS option: %w", err)
+	}
+	o.ErrorCode = fields.ErrorCode
+	o.ExtraText = fields.ExtraText
+	return nil
+}
+
 // EDNSOptionRaw is a generic EDNS(0) option for codes that have no
 // registered parser.  It preserves the option code and payload verbatim.
 type EDNSOptionRaw struct {
@@ -136,6 +175,26 @@ func (o EDNSOptionRaw) MarshalJSON() ([]byte, error) {
 		"Code":       o.OptionCode,
 		"OptionData": hex.EncodeToString(o.OptionData),
 	})
+}
+
+// UnmarshalJSON decodes the option from the JSON object MarshalJSON
+// produces, taking the payload from its hexadecimal string.  The option
+// code is taken from the "Code" field.
+func (o *EDNSOptionRaw) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Code       uint16 `json:"Code"`
+		OptionData string `json:"OptionData"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse raw EDNS option: %w", err)
+	}
+	optionData, err := hex.DecodeString(fields.OptionData)
+	if err != nil {
+		return fmt.Errorf("invalid EDNS option data %q: %w", fields.OptionData, err)
+	}
+	o.OptionCode = fields.Code
+	o.OptionData = optionData
+	return nil
 }
 
 // EDNS0 version (RFC 6891)
@@ -226,6 +285,64 @@ func (r RecordOPT) MarshalJSON() ([]byte, error) {
 		"Flags":   r.Flags,
 		"Options": r.Options,
 	})
+}
+
+func (r *RecordOPT) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Version uint8             `json:"Version"`
+		Flags   uint16            `json:"Flags"`
+		Options []json.RawMessage `json:"Options"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse OPT record: %w", err)
+	}
+	var options []EDNSOption
+	if fields.Options != nil {
+		options = make([]EDNSOption, 0, len(fields.Options))
+		for _, raw := range fields.Options {
+			opt, err := unmarshalEDNSOption(raw)
+			if err != nil {
+				return err
+			}
+			options = append(options, opt)
+		}
+	}
+	r.Version = fields.Version
+	r.Flags = fields.Flags
+	r.Options = options
+	return nil
+}
+
+// unmarshalEDNSOption decodes a single EDNS option into the concrete option
+// type selected by its option code, mirroring the wire-format parser.
+// Option codes the library does not interpret are decoded as EDNSOptionRaw.
+func unmarshalEDNSOption(data json.RawMessage) (EDNSOption, error) {
+	var header struct {
+		Code uint16 `json:"Code"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		return nil, fmt.Errorf("cannot parse EDNS option: %w", err)
+	}
+
+	var opt EDNSOption
+	switch header.Code {
+	case EDNSOptionCodeDNSSEC:
+		opt = new(EDNSOptionDNSSEC)
+	case EDNSOptionCodeNSID:
+		opt = new(EDNSOptionNSID)
+	case EDNSOptionCodeEDE:
+		opt = new(EDNSOptionEDE)
+	default:
+		raw := new(EDNSOptionRaw)
+		if err := json.Unmarshal(data, raw); err != nil {
+			return nil, fmt.Errorf("cannot parse EDNS option %d: %w", header.Code, err)
+		}
+		return raw, nil
+	}
+	if err := json.Unmarshal(data, opt); err != nil {
+		return nil, fmt.Errorf("cannot parse EDNS option %d: %w", header.Code, err)
+	}
+	return opt, nil
 }
 
 // NewRecordOPT creates a new RecordOPT from structured values

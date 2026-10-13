@@ -50,6 +50,21 @@ func (r RecordMX) MarshalJSON() ([]byte, error) {
 	})
 }
 
+// UnmarshalJSON decodes the record from the JSON object MarshalJSON
+// produces, taking the exchange name from its presentation-format string.
+func (r *RecordMX) UnmarshalJSON(data []byte) error {
+	var fields struct {
+		Preference uint16     `json:"Preference"`
+		Exchange   DomainName `json:"Exchange"`
+	}
+	if err := json.Unmarshal(data, &fields); err != nil {
+		return fmt.Errorf("cannot parse MX record: %w", err)
+	}
+	r.Preference = fields.Preference
+	r.Exchange = fields.Exchange
+	return nil
+}
+
 // NewRecordMX creates a new RecordMX from structured values
 func NewRecordMX(preference uint16, exchange DomainName) RecordMX {
 	return RecordMX{
