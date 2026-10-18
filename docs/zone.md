@@ -129,7 +129,98 @@ wire := z.CanonicalWireFormat()
 // rrsig, err := dnsmsg.SignRRSet(&rs, signer, 8, keyTag, signerName, inception, expiration)
 ```
 
-## エラーハンドリング
+## ゾーンの NSEC 署名（Zone.Sign）
+
+`Zone.Sign()` はゾーン内の各 RRSet に RRSIG を生成し、各オーナー名に NSEC レコードとその RRSIG を生成して、すべての署名レコードを `[]ResourceRecord` で返します（RFC 4034）。
+
+### Zone.Sign のシグネチャ
+
+```go
+func (z Zone) Sign(signer crypto.Signer, algorithm uint8, keyTag uint16, signerName DomainName, inception, expiration uint32) ([]ResourceRecord, error)
+```
+
+| 引数 | 型 | 内容 |
+|------|----|------|
+| `signer` | `crypto.Signer` | 秘密鍵（*rsa.PrivateKey や *ecdsa.PrivateKey など） |
+| `algorithm` | `uint8` | DNSSEC アルゴリズム番号（`SupportedDNSSECAlgorithms()` 参照） |
+| `keyTag` | `uint16` | 署名鍵の DNSKEY キータグ |
+| `signerName` | `DomainName` | 署名鍵のオーナー名（DNSKEY レコードのオーナー） |
+| `inception` | `uint32` | 署名開始時刻（Unix秒、0なら現在時刻） |
+| `expiration` | `uint32` | 署名有効期限（Unix秒、0なら無期限） |
+
+### 戻り値
+
+`[]ResourceRecord` には以下が含まれる：
+
+1. 各 RRSet に対する RRSIG レコード（Type, Name, TTL は元の RRSet を継承）
+2. 各オーナー名に対する NSEC レコード（TTL はゾーンの DefaultTTL）
+3. 各 NSEC レコードに対する RRSIG レコード
+
+NSEC レコードの Next Domain Name は、canonical 順での次のオーナー名を指し、最後のオーナー名の場合はゾーンの Origin に戻る（ゾーンの輪郭を閉じる）。
+
+### 使用例
+
+```go
+package main
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"fmt"
+	"log"
+
+	"github.com/sischkg/dnsmsg"
+)
+
+func main() {
+	origin, _ := dnsmsg.NewDomainNameFromString("example.com.")
+
+	// ゾーンを構築
+	z := dnsmsg.NewZone(origin, 3600)
+
+	www, _ := dnsmsg.NewDomainNameFromString("www.example.com.")
+	z.AddRRSet(dnsmsg.NewRRSet(
+		www, dnsmsg.CLASS_IN, dnsmsg.TYPE_A, 3600,
+		dnsmsg.NewRecordA([4]byte{192, 0, 2, 1}),
+	))
+
+	ns, _ := dnsmsg.NewDomainNameFromString("ns.example.com.")
+	z.AddRRSet(dnsmsg.NewRRSet(
+		origin, dnsmsg.CLASS_IN, dnsmsg.TYPE_NS, 86400,
+		dnsmsg.NewRecordNS(ns),
+	))
+
+	// 秘密鍵で署名（実際は dnssec-keygen の .private ファイルから読み込む）
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	signerName, _ := dnsmsg.NewDomainNameFromString("example.com.")
+
+	signedRecords, err := z.Sign(
+		privateKey,        // crypto.Signer
+		8,                 // RSASHA256
+		12345,             // キータグ
+		signerName,        // 署名鍵のオーナー名
+		1700000000,        // inception
+		1800000000,        // expiration
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, rr := range signedRecords {
+		fmt.Println(rr) // RRSIG / NSEC / NSEC の RRSIG が出力される
+	}
+}
+```
+
+### エラーハンドリング
+
+| ケース | エラー |
+|------|--------|
+| `signer` が nil | `signer is nil` |
+| 非対応アルゴリズム | `unsupported DNSSEC algorithm N for zone signing` |
+| 署名失敗 | `cannot sign RRSet ...: <原因>` または `cannot sign NSEC for ...: <原因>` |
+
+## エラーハンドリング（Zone 全般）
 
 - `FindRRSet` は見つからない場合は `false` を返す（エラーではない）
 - `ResourceRecordsToZone` は不正なドメイン名を持つレコードはスキップする
@@ -140,4 +231,7 @@ wire := z.CanonicalWireFormat()
 - [index.md](index.md) — パッケージ概要
 - [rrset.md](rrset.md) — RRSet と DNSSEC 署名（正規ワイヤフォーマット、SignRRSet、SupportedDNSSECAlgorithms）
 - [dnssec.md](dnssec.md) — DNSSEC 鍵ファイル（BIND dnssec-keygen 生成）の読み込み
+- [RFC 4034](https://datatracker.ietf.org/doc/html/rfc4034) — DNS Security (DNSSEC) Resource Records
+- [RFC 4034 Section 5.2](https://datatracker.ietf.org/doc/html/rfc4034#section-5.2) — NSEC Record
 - [RFC 4034 Section 6.2](https://datatracker.ietf.org/doc/html/rfc4034#section-6.2) — Canonical RR Set Form
+
