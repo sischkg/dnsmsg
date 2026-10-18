@@ -10,6 +10,7 @@ import (
 	"encoding/asn1"
 	"math/big"
 	"testing"
+	"time"
 )
 
 func buildSignableZone(t *testing.T) Zone {
@@ -390,4 +391,98 @@ func TestZoneSignTTL(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestZoneSignWildcardRRSetVerification(t *testing.T) {
+	apex := testDomainName(t, "example.com.")
+	wildcard := testDomainName(t, "*.example.com.")
+	expanded := testDomainName(t, "www.example.com.")
+
+	privateKey, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey() error = %v", err)
+	}
+
+	dnskey := &RecordDNSKEY{
+		Flags:     256,
+		Protocol:  3,
+		Algorithm: 8,
+		PublicKey: dnskeyMaterialFromPublicKey(t, privateKey.Public()),
+	}
+
+	z := NewZone(apex, 3600)
+	z.AddRRSet(NewRRSet(apex, CLASS_IN, TYPE_SOA, 3600, NewRecordSOA(
+		testDomainName(t, "ns1.example.com."),
+		testDomainName(t, "admin.example.com."),
+		2026010101, 3600, 900, 1209600, 300,
+	)))
+	z.AddRRSet(NewRRSet(apex, CLASS_IN, TYPE_DNSKEY, 3600, dnskey))
+	z.AddRRSet(NewRRSet(wildcard, CLASS_IN, TYPE_A, 3600, NewRecordA([4]byte{192, 0, 2, 1})))
+
+	records, err := z.Sign(privateKey, 8, 12345, apex, 1700000000, 1800000000)
+	if err != nil {
+		t.Fatalf("Zone.Sign() error = %v", err)
+	}
+
+	// ゾーンにはワイルドカードが展開されないままの名前で格納され、
+	// その名前のまま署名されている。
+	rsWildcard, ok := z.FindRRSet(wildcard, TYPE_A)
+	if !ok {
+		t.Fatalf("FindRRSet(*.example.com., A) not found")
+	}
+	rrsig := findRRSIGFor(t, records, wildcard, TYPE_A)
+	if rrsig.Labels != 2 {
+		t.Errorf("wildcard RRSIG Labels = %d, want 2", rrsig.Labels)
+	}
+	if rrsig.OrigTTL != 3600 {
+		t.Errorf("wildcard RRSIG OrigTTL = %d, want 3600", rrsig.OrigTTL)
+	}
+
+	// www.example.com. に対して提供される展開済み RRSet は、ワイルドカード名に
+	// 対するこの RRSIG で検証できる。
+	rsExpanded := NewRRSet(expanded, CLASS_IN, TYPE_A, rrsig.OrigTTL,
+		NewRecordA([4]byte{192, 0, 2, 1}))
+	if err := VerifyRRSetWithDNSKEY(&rsExpanded, rrsig, dnskey, time.Unix(1750000000, 0)); err != nil {
+		t.Errorf("VerifyRRSetWithDNSKEY(www.example.com. <- *.example.com.) error = %v", err)
+	}
+
+	// 展開されないワイルドカード RRSet 自体も検証できる。
+	if err := VerifyRRSetWithDNSKEY(&rsWildcard, rrsig, dnskey, time.Unix(1750000000, 0)); err != nil {
+		t.Errorf("VerifyRRSetWithDNSKEY(*.example.com.) error = %v", err)
+	}
+
+	// ワイルドカードは同じ接末のより深い展開も覆う (RFC 1034 Section 4.3.3)。
+	// www.sub.example.com. は Labels=2 から *.example.com. に復元されるため検証できる。
+	deeper := NewRRSet(testDomainName(t, "www.sub.example.com."), CLASS_IN, TYPE_A, 3600,
+		NewRecordA([4]byte{192, 0, 2, 1}))
+	if err := VerifyRRSetWithDNSKEY(&deeper, rrsig, dnskey, time.Unix(1750000000, 0)); err != nil {
+		t.Errorf("VerifyRRSetWithDNSKEY(www.sub.example.com. <- *.example.com.) error = %v", err)
+	}
+
+	// ワイルドカードの接末にない名前は検証できない。
+	other := NewRRSet(testDomainName(t, "www.example.org."), CLASS_IN, TYPE_A, 3600,
+		NewRecordA([4]byte{192, 0, 2, 1}))
+	if err := VerifyRRSetWithDNSKEY(&other, rrsig, dnskey, time.Unix(1750000000, 0)); err == nil {
+		t.Error("VerifyRRSetWithDNSKEY(www.example.org.) expected error, got nil")
+	}
+}
+
+// findRRSIGFor は records の中から name にあり type を覆う RRSIG を 1 件返す。
+func findRRSIGFor(t *testing.T, records []ResourceRecord, name DomainName, typ ResourceType) *RecordRRSIG {
+	t.Helper()
+	for _, rr := range records {
+		if rr.Type != TYPE_RRSIG || !rr.Name.Equal(name) {
+			continue
+		}
+		rrsig, ok := rr.RData.(RecordRRSIG)
+		if !ok {
+			continue
+		}
+		if ResourceType(rrsig.TypeCovered) == typ {
+			out := rrsig
+			return &out
+		}
+	}
+	t.Fatalf("no RRSIG covering %s %s found in Zone.Sign() records", name, typ)
+	return nil
 }
