@@ -59,6 +59,7 @@ const (
 	TYPE_DNSKEY ResourceType = 48
 	TYPE_TSIG   ResourceType = 250
 	TYPE_NSEC   ResourceType = 32
+	TYPE_NSEC3  ResourceType = 50
 )
 
 func (t ResourceType) String() string {
@@ -85,6 +86,8 @@ func (t ResourceType) String() string {
 		return "TSIG"
 	case TYPE_NSEC:
 		return "NSEC"
+	case TYPE_NSEC3:
+		return "NSEC3"
 	default:
 		return fmt.Sprintf("TYPE%d", t)
 	}
@@ -120,6 +123,8 @@ func NewType(s string) (ResourceType, error) {
 		return TYPE_TSIG, nil
 	case "NSEC":
 		return TYPE_NSEC, nil
+	case "NSEC3":
+		return TYPE_NSEC3, nil
 	default:
 		return 0, fmt.Errorf(`unknown resource type "%s"`, s)
 	}
@@ -383,6 +388,8 @@ func (rr *ResourceRecord) unmarshalRData(data json.RawMessage) error {
 		rdata = new(RecordDNSKEY)
 	case TYPE_NSEC:
 		rdata = new(RecordNSEC)
+	case TYPE_NSEC3:
+		rdata = new(RecordNSEC3)
 	default:
 		raw := new(RecordRaw)
 		if err := json.Unmarshal(data, raw); err != nil {
@@ -463,6 +470,8 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 		rr.RData, _, err = ParseRecordTSIG(w, p, end)
 	case TYPE_NSEC:
 		rr.RData, _, err = ParseRecordNSEC(w, p, end)
+	case TYPE_NSEC3:
+		rr.RData, _, err = ParseRecordNSEC3(w, p, end)
 	default:
 		rr.RData, _, err = ParseRecordRaw(w, p, end, rr.Type)
 	}
