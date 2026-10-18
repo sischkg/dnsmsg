@@ -21,6 +21,10 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
   - 共有鍵（`TSIGKey`）、署名オプション（`TSIGOptions`）、検証オプション（`TSIGVerifyOptions`）
   - HMAC-MD5 / HMAC-SHA1 / HMAC-SHA224 / HMAC-SHA256 / HMAC-SHA384 / HMAC-SHA512
     および短縮アルゴリズム（`-128` / `-192` / `-256`）
+- DNSSEC 鍵ファイル（BIND `dnssec-keygen` 生成）の読み込み（`docs/dnssec.md`）:
+  - `ReadKeyFile` で `.key` ファイル（公開鍵 / DNSKEY レコード）を読み込む
+  - `ReadPrivateKeyFile` で `.private` ファイル（秘密鍵 / Private-key-format v1.3）を読み込む
+  - `DNSSECKey.ToDNSKEY()` で `RecordDNSKEY` に変換
 - UDP / TCP による DNS クエリ送信（`SendQuery`）
 
 ## サポートするレコードタイプ
@@ -48,6 +52,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | ファイル | 内容 |
 |----------|------|
 | [index.md](index.md) | 本ページ。パッケージの概要、クイックスタート、主要な型の一覧 |
+| [dnssec.md](dnssec.md) | DNSSEC 鍵ファイル（BIND dnssec-keygen 生成）の読み込み（`.key` / `.private`） |
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
 | [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
