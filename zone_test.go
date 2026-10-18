@@ -147,10 +147,11 @@ func TestZoneCanonicalWireFormat(t *testing.T) {
 		t.Errorf("CanonicalWireFormat() returned empty")
 	}
 
-	// ゾーン内の RRSet がソートされていることを確認。
-	// バイト列辞書順では www.example.com. (03...) が example.com. (07...) より先。
-	if !bytes.HasPrefix(wire, []byte{0x03, 'w', 'w', 'w', 0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 0x03, 'c', 'o', 'm', 0x00}) {
-		t.Errorf("CanonicalWireFormat() prefix = %x, want www.example.com. first", wire[:15])
+	// ゾーン内の RRSet が canonical DNS name order (RFC 4034 Section 6.1)
+	// でソートされていることを確認。
+	// ラベル数が少ない example.com. が www.example.com. より先。
+	if !bytes.HasPrefix(wire, []byte{0x07, 'e', 'x', 'a', 'm', 'p', 'l', 'e', 0x03, 'c', 'o', 'm', 0x00}) {
+		t.Errorf("CanonicalWireFormat() prefix = %x, want example.com. first", wire[:13])
 	}
 }
 
@@ -189,12 +190,13 @@ func TestZoneSortedRRsets(t *testing.T) {
 	if len(ordered) != 2 {
 		t.Errorf("sortedRRsets() len = %d, want 2", len(ordered))
 	}
-	// バイト列辞書順では www.example.com. (03...) が example.com. (07...) より先
-	if !ordered[0].Name.Equal(www) {
-		t.Errorf("sortedRRsets()[0].Name = %s, want %s", ordered[0].Name, www)
+	// canonical DNS name order (RFC 4034 Section 6.1) ではラベル数の少ない
+	// example.com. が www.example.com. より先
+	if !ordered[0].Name.Equal(origin) {
+		t.Errorf("sortedRRsets()[0].Name = %s, want %s", ordered[0].Name, origin)
 	}
-	if !ordered[1].Name.Equal(origin) {
-		t.Errorf("sortedRRsets()[1].Name = %s, want %s", ordered[1].Name, origin)
+	if !ordered[1].Name.Equal(www) {
+		t.Errorf("sortedRRsets()[1].Name = %s, want %s", ordered[1].Name, www)
 	}
 }
 

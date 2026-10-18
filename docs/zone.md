@@ -34,7 +34,7 @@ func ResourceRecordsToZone(origin DomainName, defaultTTL uint32, records []Resou
 
 ## 正規ワイヤフォーマット
 
-`CanonicalWireFormat` は各 RRSet を RFC 4034 Section 6.2 に従って正規化し、RRSet 自体をオーナー名とタイプの順（バイト列辞書順）でソートして出力します。これはゾーン転送（AXFR）の形式に準拠しています。
+`CanonicalWireFormat` は各 RRSet を RFC 4034 Section 6.2 に従って正規化し、RRSet 自体をオーナー名とタイプの順でソートして出力します。オーナー名の順序は RFC 4034 Section 6.1 の canonical DNS name order（右端のラベルから比較する順序）で、`DomainName.CompareCanonicalOrder()` がその順序を実装しています。ラベル数が少ない名前ほど先になるため、ゾーンの Origin が常に最初の RRSet になります。これはゾーン転送（AXFR）の形式に準拠しています。
 
 各 RRSet 内では、TTL は 0 に固定され、RDATA は canonical order でソートされます（`RRSet.CanonicalWireFormat()` を参照）。
 
@@ -156,7 +156,7 @@ func (z Zone) Sign(signer crypto.Signer, algorithm uint8, keyTag uint16, signerN
 2. 各オーナー名に対する NSEC レコード（TTL はゾーンの DefaultTTL）
 3. 各 NSEC レコードに対する RRSIG レコード
 
-NSEC レコードの Next Domain Name は、canonical 順での次のオーナー名を指し、最後のオーナー名の場合はゾーンの Origin に戻る（ゾーンの輪郭を閉じる）。
+NSEC レコードの Next Domain Name は、canonical DNS name order（RFC 4034 Section 6.1）での次のオーナー名を指し、最後のオーナー名の場合はゾーンの Origin に戻る（ゾーンの輪郭を閉じる）。Origin はラベル数が最も少ない名前として canonical 順の先頭になるため、Origin の NSEC はゾーン内の最初のオーナー名を指し、ゾーン内で最後のオーナー名となる NSEC が Origin に戻る (RFC 4034 Section 4.1.1)。
 
 ### 使用例
 

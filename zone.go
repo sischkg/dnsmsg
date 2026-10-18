@@ -114,10 +114,13 @@ func (z Zone) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 }
 
 // sortedRRsets は RRSet をオーナー名とタイプの順でソートしたコピーを返す。
+// オーナー名の順序は RFC 4034 Section 6.1 の canonical DNS name order
+// （右端のラベルから比較する順序）である。NSEC チェーンはこの順序で
+// 作られる (RFC 4034 Section 3.1.2)。
 func (z Zone) sortedRRsets() []RRSet {
 	ordered := append([]RRSet(nil), z.RRsets...)
 	sort.SliceStable(ordered, func(i, j int) bool {
-		cmp := bytes.Compare(ordered[i].Name.CanonicalWireFormat(), ordered[j].Name.CanonicalWireFormat())
+		cmp := ordered[i].Name.CompareCanonicalOrder(ordered[j].Name)
 		if cmp != 0 {
 			return cmp < 0
 		}
@@ -170,8 +173,8 @@ func ResourceRecordsToZone(origin DomainName, defaultTTL uint32, records []Resou
 }
 
 // ownerNamesWithTypes はゾーン内の各ユニークなオーナー名と、その名前に
-// 存在する RR タイプの集合を返す。結果はオーナー名の canonical
-// ワイヤフォーマット順でソートされる。
+// 存在する RR タイプの集合を返す。結果はオーナー名の canonical DNS name
+// order (RFC 4034 Section 6.1) 順でソートされる。
 func (z Zone) ownerNamesWithTypes() ([]DomainName, map[string][]ResourceType) {
 	nameSet := make(map[string]struct{})
 	typesMap := make(map[string][]ResourceType)
@@ -193,9 +196,9 @@ func (z Zone) ownerNamesWithTypes() ([]DomainName, map[string][]ResourceType) {
 		names = append(names, name)
 	}
 
-	// canonical ワイヤフォーマット順でソート
+	// canonical DNS name order (RFC 4034 Section 6.1) でソート
 	sort.SliceStable(names, func(i, j int) bool {
-		return bytes.Compare(names[i].CanonicalWireFormat(), names[j].CanonicalWireFormat()) < 0
+		return names[i].CompareCanonicalOrder(names[j]) < 0
 	})
 
 	// 重複タイプを排除してソート済みにする

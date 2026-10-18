@@ -377,6 +377,81 @@ func (lhs DomainName) Equal(rhs DomainName) bool {
 	return true
 }
 
+// CompareCanonicalOrder compares lhs and rhs in canonical DNS name order, as
+// defined by RFC 4034 Section 6.1: individual labels are treated as unsigned
+// left-justified octet strings, the absence of an octet sorts before a zero
+// value octet, and uppercase US-ASCII letters are treated as if they were
+// lowercase US-ASCII letters. Names are ordered by their most significant
+// (rightmost) label first; names whose most significant labels are equal are
+// ordered by their next most significant label, and so forth.
+//
+// It returns a negative number if lhs sorts before rhs, 0 if the two names
+// occupy the same position (that is, they are equal apart from case), and a
+// positive number if lhs sorts after rhs. The terminating root label carries
+// no octets of its own, so the root domain sorts before every other name.
+//
+// For example, the names listed in RFC 4034 Section 6.1 sort as
+// "example.", "a.example.", "yljkjljk.a.example.", "Z.a.example.",
+// "zABC.a.EXAMPLE.", "z.example.", "\001.z.example.", "*.z.example.",
+// "\200.z.example.".
+func (lhs DomainName) CompareCanonicalOrder(rhs DomainName) int {
+	// labels are stored most specific first and terminated by the root
+	// label, which carries no octets of its own.  The most significant
+	// label of a name is therefore the one just before the root label, and
+	// walking the labels backwards compares the most significant labels
+	// first.
+	li := len(lhs.labels) - 2
+	ri := len(rhs.labels) - 2
+	for li >= 0 && ri >= 0 {
+		cmp := lhs.labels[li].compareCanonical(rhs.labels[ri])
+		if cmp != 0 {
+			return cmp
+		}
+		li--
+		ri--
+	}
+
+	// All the labels the two names have in common are equal: the name with
+	// fewer labels sorts first, because the absence of an octet sorts
+	// before a zero value octet.
+	switch {
+	case li < 0 && ri < 0:
+		return 0
+	case li < 0:
+		return -1
+	}
+	return 1
+}
+
+// compareCanonical compares lhs and rhs as unsigned left-justified octet
+// strings in the manner RFC 4034 Section 6.1 prescribes for the labels of a
+// domain name: ASCII letters are compared in canonical lower-case form, and
+// the absence of an octet sorts before a zero value octet, so a label that is
+// a prefix of the other sorts first.
+func (lhs Label) compareCanonical(rhs Label) int {
+	n := len(lhs.data)
+	if len(rhs.data) < n {
+		n = len(rhs.data)
+	}
+	for i := 0; i < n; i++ {
+		l, r := toLower(lhs.data[i]), toLower(rhs.data[i])
+		if l != r {
+			if l < r {
+				return -1
+			}
+			return 1
+		}
+	}
+
+	switch {
+	case len(lhs.data) < len(rhs.data):
+		return -1
+	case len(lhs.data) > len(rhs.data):
+		return 1
+	}
+	return 0
+}
+
 // ParentDomainNames returns d itself followed by each of its parent
 // domains, most specific first: "www.example.com." yields
 // ["www.example.com.", "example.com.", "com."].

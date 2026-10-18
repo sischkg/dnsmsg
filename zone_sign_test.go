@@ -271,10 +271,16 @@ func TestZoneSignNSECChain(t *testing.T) {
 		t.Errorf("expected 3 NSEC records, got %d", len(nsecs))
 	}
 
-	// canonical 順: a.example.com. (01 a...) < b.example.com. (01 b...) < example.com. (07 example...)
-	// a -> b, b -> example.com., example.com. -> origin (example.com.)
-	// 最後は orig (example.com.) に戻る
+	// canonical DNS name order (RFC 4034 Section 6.1): example.com. (1 ラベル)
+	// < a.example.com. < b.example.com.。最後は orig (example.com.) に戻る。
+	// example.com. -> a.example.com., a.example.com. -> b.example.com.,
+	// b.example.com. -> origin (example.com.)
 
+	if nsecOrigin, ok := nsecs["example.com."]; ok {
+		if !nsecOrigin.NextDomainName.Equal(a) {
+			t.Errorf("NSEC example.com. NextDomainName = %s, want a.example.com.", nsecOrigin.NextDomainName)
+		}
+	}
 	if nsecA, ok := nsecs["a.example.com."]; ok {
 		if !nsecA.NextDomainName.Equal(b) {
 			t.Errorf("NSEC a.example.com. NextDomainName = %s, want b.example.com.", nsecA.NextDomainName)
@@ -283,11 +289,6 @@ func TestZoneSignNSECChain(t *testing.T) {
 	if nsecB, ok := nsecs["b.example.com."]; ok {
 		if !nsecB.NextDomainName.Equal(origin) {
 			t.Errorf("NSEC b.example.com. NextDomainName = %s, want example.com.", nsecB.NextDomainName)
-		}
-	}
-	if nsecOrigin, ok := nsecs["example.com."]; ok {
-		if !nsecOrigin.NextDomainName.Equal(origin) {
-			t.Errorf("NSEC example.com. NextDomainName = %s, want example.com. (origin)", nsecOrigin.NextDomainName)
 		}
 	}
 
@@ -312,6 +313,76 @@ func TestZoneSignNSECChain(t *testing.T) {
 		}
 		if !foundSOA {
 			t.Errorf("NSEC example.com. missing TYPE_SOA in types")
+		}
+	}
+}
+
+func TestZoneSignNSECChainWildcardCanonicalOrder(t *testing.T) {
+	// ワイルドカード名は canonical DNS name order (RFC 4034 Section 6.1) では
+	// '*' (0x2A) が英数字より小さいため、同じ接末の通常の名前より先に並ぶ。
+	// example.com. < *.example.com. < a.example.com. < sub.example.com.
+	origin := testDomainName(t, "example.com.")
+	wildcard := testDomainName(t, "*.example.com.")
+	a := testDomainName(t, "a.example.com.")
+	sub := testDomainName(t, "sub.example.com.")
+
+	z := NewZone(origin, 3600)
+	z.AddRRSet(NewRRSet(sub, CLASS_IN, TYPE_A, 3600, NewRecordA([4]byte{10, 0, 0, 3})))
+	z.AddRRSet(NewRRSet(a, CLASS_IN, TYPE_A, 3600, NewRecordA([4]byte{10, 0, 0, 2})))
+	z.AddRRSet(NewRRSet(wildcard, CLASS_IN, TYPE_A, 3600, NewRecordA([4]byte{10, 0, 0, 1})))
+	z.AddRRSet(NewRRSet(origin, CLASS_IN, TYPE_SOA, 3600, NewRecordSOA(
+		testDomainName(t, "ns.example.com."),
+		testDomainName(t, "hostmaster.example.com."),
+		1, 3600, 1800, 604800, 86400,
+	)))
+
+	// sortedRRsets がワイルドカードを正しい位置に並べることを確認
+	ordered := z.sortedRRsets()
+	wantOrder := []DomainName{origin, wildcard, a, sub}
+	if len(ordered) != len(wantOrder) {
+		t.Fatalf("sortedRRsets() len = %d, want %d", len(ordered), len(wantOrder))
+	}
+	for i, want := range wantOrder {
+		if !ordered[i].Name.Equal(want) {
+			t.Errorf("sortedRRsets()[%d].Name = %s, want %s", i, ordered[i].Name, want)
+		}
+	}
+
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	records, err := z.Sign(privateKey, 8, 12345, origin, 1700000000, 1800000000)
+	if err != nil {
+		t.Fatalf("Zone.Sign() error = %v", err)
+	}
+
+	nsecs := make(map[string]RecordNSEC)
+	for _, rr := range records {
+		if rr.Type == TYPE_NSEC {
+			nsec, _ := rr.RData.(RecordNSEC)
+			nsecs[rr.Name.String()] = nsec
+		}
+	}
+	if len(nsecs) != 4 {
+		t.Fatalf("expected 4 NSEC records, got %d", len(nsecs))
+	}
+
+	chain := []struct {
+		name string
+		next DomainName
+	}{
+		{"example.com.", wildcard},
+		{"*.example.com.", a},
+		{"a.example.com.", sub},
+		{"sub.example.com.", origin},
+	}
+	for _, want := range chain {
+		nsec, ok := nsecs[want.name]
+		if !ok {
+			t.Errorf("NSEC %s not found", want.name)
+			continue
+		}
+		if !nsec.NextDomainName.Equal(want.next) {
+			t.Errorf("NSEC %s NextDomainName = %s, want %s",
+				want.name, nsec.NextDomainName, want.next)
 		}
 	}
 }

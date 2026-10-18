@@ -1103,6 +1103,176 @@ func TestDomainNameEqual(t *testing.T) {
 	}
 }
 
+// canonicalOrderSign reduces a comparison result to its sign, so that tests
+// can state the expected order without depending on the magnitude returned.
+func canonicalOrderSign(cmp int) int {
+	switch {
+	case cmp < 0:
+		return -1
+	case cmp > 0:
+		return 1
+	}
+	return 0
+}
+
+func TestDomainNameCompareCanonicalOrderRFC4034Example(t *testing.T) {
+	// RFC 4034 Section 6.1 lists these names in canonical DNS name order.
+	// Comparing any two of them must agree with their position in the list.
+	example := []string{
+		"example.",
+		"a.example.",
+		"yljkjljk.a.example.",
+		"Z.a.example.",
+		"zABC.a.EXAMPLE.",
+		"z.example.",
+		"\\001.z.example.",
+		"*.z.example.",
+		"\\200.z.example.",
+	}
+
+	names := make([]DomainName, len(example))
+	for i, s := range example {
+		name, err := NewDomainNameFromString(s)
+		if err != nil {
+			t.Fatalf("NewDomainNameFromString(%q) error = %v", s, err)
+		}
+		names[i] = name
+	}
+
+	for i := range names {
+		for j := range names {
+			var want int
+			switch {
+			case i < j:
+				want = -1
+			case i > j:
+				want = 1
+			}
+			got := canonicalOrderSign(names[i].CompareCanonicalOrder(names[j]))
+			if got != want {
+				t.Errorf("CompareCanonicalOrder(%q, %q) sign = %d, want %d",
+					example[i], example[j], got, want)
+			}
+		}
+	}
+}
+
+func TestDomainNameCompareCanonicalOrder(t *testing.T) {
+	tests := []struct {
+		name string
+		lhs  string
+		rhs  string
+		want int
+	}{
+		{
+			// The root label carries no octets, so the root domain is the
+			// shortest name and sorts first.
+			name: "root domain sorts before any name",
+			lhs:  ".",
+			rhs:  "example.",
+			want: -1,
+		},
+		{
+			name: "name with fewer labels sorts first",
+			lhs:  "example.",
+			rhs:  "a.example.",
+			want: -1,
+		},
+		{
+			// "a.example" sorts before "z.example" no matter what the
+			// labels to the left of them are.
+			name: "most significant labels decide first",
+			lhs:  "zzz.a.example.",
+			rhs:  "a.z.example.",
+			want: -1,
+		},
+		{
+			name: "equal names differ by case only",
+			lhs:  "WWW.Example.COM.",
+			rhs:  "www.example.com.",
+			want: 0,
+		},
+		{
+			name: "uppercase letters sort as lowercase",
+			lhs:  "Z.example.",
+			rhs:  "z.example.",
+			want: 0,
+		},
+		{
+			name: "labels are compared as unsigned octets",
+			lhs:  "\\001.example.",
+			rhs:  "\\200.example.",
+			want: -1,
+		},
+		{
+			name: "a label that is a prefix sorts first",
+			lhs:  "a.example.",
+			rhs:  "aa.example.",
+			want: -1,
+		},
+		{
+			// RFC 4034 Section 6.1: the absence of an octet sorts before a
+			// zero value octet.
+			name: "absence of an octet sorts before a zero value octet",
+			lhs:  "a.example.",
+			rhs:  "a\\000.example.",
+			want: -1,
+		},
+		{
+			// 0x2a sorts after the absent octet of "example." and before
+			// the 0x61 of "a".
+			name: "wildcard label sorts by its octet value",
+			lhs:  "*.example.com.",
+			rhs:  "a.example.com.",
+			want: -1,
+		},
+		{
+			name: "wildcard label sorts before high octets",
+			lhs:  "*.z.example.",
+			rhs:  "\\200.z.example.",
+			want: -1,
+		},
+		{
+			name: "apex sorts before its subdomains",
+			lhs:  "example.com.",
+			rhs:  "*.example.com.",
+			want: -1,
+		},
+		{
+			name: "reverse order is symmetric",
+			lhs:  "www.example.com.",
+			rhs:  "example.com.",
+			want: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lhs, err := NewDomainNameFromString(tt.lhs)
+			if err != nil {
+				t.Fatalf("NewDomainNameFromString(%q) error = %v", tt.lhs, err)
+			}
+			rhs, err := NewDomainNameFromString(tt.rhs)
+			if err != nil {
+				t.Fatalf("NewDomainNameFromString(%q) error = %v", tt.rhs, err)
+			}
+
+			got := canonicalOrderSign(lhs.CompareCanonicalOrder(rhs))
+			if got != tt.want {
+				t.Errorf("CompareCanonicalOrder(%q, %q) sign = %d, want %d",
+					tt.lhs, tt.rhs, got, tt.want)
+			}
+
+			// The comparison must be antisymmetric.
+			reverse := canonicalOrderSign(rhs.CompareCanonicalOrder(lhs))
+			if reverse != -tt.want {
+				t.Errorf("CompareCanonicalOrder(%q, %q) sign = %d, want %d",
+					tt.rhs, tt.lhs, reverse, -tt.want)
+			}
+		})
+	}
+}
+
 func TestDomainNameParentDomainNames(t *testing.T) {
 	tests := []struct {
 		name  string
