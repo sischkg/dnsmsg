@@ -16,6 +16,11 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
   - Extended DNS Errors / EDE（RFC 8914）
   - 未定義オプショコードの生データ保持（`EDNSOptionRaw`）および
     カスタムパーサの登録（`RegisterEDNSOptionParser`）
+- TSIG による DNS メッセージの鍵ベース認証（RFC 8945）:
+  - `Message.SignTSIG` / `Message.VerifyTSIG` での署名と検証
+  - 共有鍵（`TSIGKey`）、署名オプション（`TSIGOptions`）、検証オプション（`TSIGVerifyOptions`）
+  - HMAC-MD5 / HMAC-SHA1 / HMAC-SHA224 / HMAC-SHA256 / HMAC-SHA384 / HMAC-SHA512
+    および短縮アルゴリズム（`-128` / `-192` / `-256`）
 - UDP / TCP による DNS クエリ送信（`SendQuery`）
 
 ## サポートするレコードタイプ
@@ -41,6 +46,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 |----------|------|
 | [index.md](index.md) | 本ページ。パッケージの概要、クイックスタート、主要な型の一覧 |
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
+| [tsig.md](tsig.md) | TSIG による DNS メッセージの署名と検証（RFC 8945） |
 
 ## クイックスタート
 
@@ -143,3 +149,4 @@ for _, rr := range resp.AnswerSection {
 ## 関連リンク
 
 - [edns.md](edns.md) — EDNS(0) / OPT レコードと EDNS option の作成
+- [tsig.md](tsig.md) — TSIG による DNS メッセージの署名と検証（RFC 8945）
