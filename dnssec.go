@@ -1,10 +1,13 @@
 package dnsmsg
 
 import (
+	"crypto"
+	"crypto/rand"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // DNSSECKey is a DNSSEC key read from a dnssec-keygen key file.
@@ -222,4 +225,157 @@ func strconvParseUint8(s, field string) (uint8, error) {
 		return 0, fmt.Errorf("invalid %s %q: %w", field, s, err)
 	}
 	return uint8(n), nil
+}
+
+// dnssecAlgorithmHash returns the hash function used by the given DNSSEC
+// algorithm number (RFC 4034 Section 5.1.1, RFC 5702, RFC 6605,
+// RFC 8078, RFC 8624).  Zero (crypto.Hash(0)) is returned for algorithms
+// which do not pre-hash (for example Ed25519).  ok is false for algorithms
+// this implementation does not know how to sign with.
+func dnssecAlgorithmHash(algorithm uint8) (crypto.Hash, bool) {
+	switch algorithm {
+	case 5: // RSASHA1
+		return crypto.SHA1, true
+	case 7: // RSASHA1-NSEC3-SHA1
+		return crypto.SHA1, true
+	case 8: // RSASHA256
+		return crypto.SHA256, true
+	case 10: // RSASHA512
+		return crypto.SHA512, true
+	case 12: // ECC-GOST (not supported)
+		return 0, false
+	case 13: // ECDSAP256SHA256
+		return crypto.SHA256, true
+	case 14: // ECDSAP384SHA384
+		return crypto.SHA384, true
+	case 15: // ED25519
+		return 0, true
+	default:
+		return 0, false
+	}
+}
+
+// labelCount returns the number of labels in the domain name, excluding the
+// terminating root label.  For example "www.example.com." has 3 labels and
+// the root domain "." has 0 labels.
+func labelCount(name DomainName) int {
+	// DomainName はルートラベルを終端ラベルとして保持する。
+	n := len(name.labels)
+	if n > 0 {
+		n-- // 終端のルートラベルを除外
+	}
+	return n
+}
+
+// DNSSECSignOptions describes how an RRSet is signed to produce an RRSIG
+// record (RFC 4034 Section 5.3).
+type DNSSECSignOptions struct {
+	// Inception is the signature inception time (Unix seconds).  The zero
+	// value means the current time.
+	Inception uint32
+	// Expiration is the signature expiration time (Unix seconds).  The zero
+	// value means no expiration (the signature is valid indefinitely).
+	Expiration uint32
+	// KeyTag is the DNSKEY key tag of the signing key.
+	KeyTag uint16
+	// SignerName is the name of the signing key (the owner name of the
+	// DNSKEY record).  The zero value means the root domain name.
+	SignerName DomainName
+}
+
+// inceptionTime returns the inception time to use.  Zero means now.
+func (o *DNSSECSignOptions) inceptionTime() uint32 {
+	if o != nil && o.Inception != 0 {
+		return o.Inception
+	}
+	return uint32(time.Now().UTC().Unix())
+}
+
+// expirationTime returns the expiration time to use.  Zero means no
+// expiration.
+func (o *DNSSECSignOptions) expirationTime() uint32 {
+	if o != nil {
+		return o.Expiration
+	}
+	return 0
+}
+
+// keyTag returns the key tag to use.
+func (o *DNSSECSignOptions) keyTag() uint16 {
+	if o != nil {
+		return o.KeyTag
+	}
+	return 0
+}
+
+// signerName returns the signer name to use.  Zero means the root domain.
+func (o *DNSSECSignOptions) signerName() DomainName {
+	if o != nil && !o.SignerName.IsRoot() {
+		return o.SignerName
+	}
+	return NewRootDomainName()
+}
+
+// SignRRSet signs the RRSet with the given private key and returns an
+// RRSIG record covering the RRSet.  The signature is computed over the
+// canonical wire format of the RRSet (RFC 4034 Section 6.2).
+//
+// signer is a crypto.Signer implementing the private key operation.  The
+// algorithm parameter is the DNSSEC algorithm number (for example 8 for
+// RSASHA256, 13 for ECDSAP256SHA256).  keyTag is the DNSKEY key tag of the
+// signing key, and signerName is the owner name of the DNSKEY record.
+//
+// The returned RRSIG has TypeCovered set to rs.Type, Algorithm set to the
+// given algorithm, Labels set to the label count of rs.Name, OrigTTL set to
+// rs.TTL, and Signature set to the signature bytes.
+func SignRRSet(rs *RRSet, signer crypto.Signer, algorithm uint8, keyTag uint16, signerName DomainName, inception, expiration uint32) (*RecordRRSIG, error) {
+	if rs == nil {
+		return nil, fmt.Errorf("RRSet is nil")
+	}
+	if signer == nil {
+		return nil, fmt.Errorf("signer is nil")
+	}
+
+	hash, ok := dnssecAlgorithmHash(algorithm)
+	if !ok {
+		return nil, fmt.Errorf("unsupported DNSSEC algorithm %d for signing", algorithm)
+	}
+
+	data := rs.CanonicalWireFormat()
+
+	var opts crypto.SignerOpts
+	var signData []byte
+	if hash != 0 {
+		opts = hash
+		// crypto/rsa と crypto/ecdsa の Sign は crypto.SHA256 などの
+		// crypto.SignerOpts を受け取ると、データを「すでにハッシュ済み」
+		// とみなす。そのため、ここでデータをハッシュしてから渡す。
+		h := hash.New()
+		h.Write(data)
+		signData = h.Sum(nil)
+	} else {
+		// Ed25519 などハッシュを指定しないアルゴリズムでは生データを渡す。
+		signData = data
+	}
+	// Ed25519 などハッシュを指定しないアルゴリズムでは opts は nil のまま。
+
+	signature, err := signer.Sign(rand.Reader, signData, opts)
+	if err != nil {
+		return nil, fmt.Errorf("cannot sign RRSet: %w", err)
+	}
+
+	labels := uint8(labelCount(rs.Name))
+
+	rrsig := NewRecordRRSIG(
+		uint16(rs.Type),
+		algorithm,
+		labels,
+		rs.TTL,
+		expiration,
+		inception,
+		keyTag,
+		signerName,
+		signature,
+	)
+	return &rrsig, nil
 }
