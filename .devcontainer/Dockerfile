@@ -21,7 +21,7 @@ USER vscode
 
 # ユーザーの GOPATH / PATH を固定して再現性を担保
 ENV GOPATH=/home/vscode/go
-ENV PATH="/home/vscode/go/bin:/home/vscode/.opencode/bin:$PATH"
+ENV PATH="/home/vscode/go/bin:/home/vscode/.opencode/bin:/usr/local/go/bin:$PATH"
 
 # OpenCode が Go 開発で使う Go LSP（gopls）
 # ビルドには cgo/gcc が使えることが前提（build-essential をインストール済み）

@@ -24,18 +24,21 @@
   //       を実行してください（存在しないとコンテナ起動時に mount が失敗する）。
   "mounts": [
     "source=${localEnv:HOME}/.config/opencode,target=/home/vscode/.config/opencode,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.config/opencode.config,target=/home/vscode/.config/opencode.config,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.local/share/opencode,target=/home/vscode/.local/share/opencode,type=bind,consistency=cached"
   ],
 
+  // 注意: postCreateCommand を「配列」で書くと exec 形式（argv）として扱われる。
+  // 配列の各要素が別々のコマンドになるわけではなく、要素 0 が実行ファイル名になるため
+  // "go version" は「go version」という名前の実行ファイルを探して exit 127 になる
+  // （`||` / `&&` / クォートもシェル解釈されない）。
+  // したがって /bin/bash にシェルスクリプトを渡す形にする。
+  // -l（ログインシェル）にすることで /etc/profile.d/99-gopls-opencode.sh が読みられ、
+  // gopls / opencode が PATH から解決できる（フォールバックも併用）。
   "postCreateCommand": [
-    "go version",
-    "git --version",
-    "gopls version || /home/vscode/go/bin/gopls version",
-    "opencode --version",
-    "curl -fsS https://example.com -o /dev/null && echo 'curl: OK'",
-    "wget -q -O /dev/null https://example.com && echo 'wget: OK'",
-    "echo '--- mounted opencode config ---'",
-    "ls -la /home/vscode/.config/opencode"
+    "/bin/bash",
+    "-lc",
+    "go version && git --version && (gopls version || /home/vscode/go/bin/gopls version) && opencode --version && curl -fsS https://example.com -o /dev/null && echo 'curl: OK' && wget -q -O /dev/null https://example.com && echo 'wget: OK' && echo '--- mounted opencode config ---' && ls -la /home/vscode/.config/opencode"
   ],
 
   // VS Code の Go 開発拡張
