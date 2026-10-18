@@ -8,6 +8,7 @@ import (
 	"crypto/sha512"
 	"fmt"
 	"hash"
+	"sort"
 	"strings"
 	"time"
 )
@@ -79,6 +80,20 @@ func tsigAlgorithmKey(s string) string {
 func (a TSIGAlgorithm) info() (tsigAlgorithmInfo, bool) {
 	ai, ok := tsigAlgorithmTable[tsigAlgorithmKey(string(a))]
 	return ai, ok
+}
+
+// SupportedTSIGAlgorithms returns the list of TSIG algorithms supported by
+// this implementation, in canonical form.  The order is deterministic
+// (lexicographic by the canonical algorithm name).
+func SupportedTSIGAlgorithms() []TSIGAlgorithm {
+	algs := make([]TSIGAlgorithm, 0, len(tsigAlgorithmTable))
+	for _, ai := range tsigAlgorithmTable {
+		algs = append(algs, ai.algorithm)
+	}
+	sort.Slice(algs, func(i, j int) bool {
+		return string(algs[i]) < string(algs[j])
+	})
+	return algs
 }
 
 // String returns the canonical form of the algorithm name, with the root label

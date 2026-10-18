@@ -579,3 +579,51 @@ func TestMessageVerifyTSIG(t *testing.T) {
 		}
 	})
 }
+
+func TestSupportedTSIGAlgorithms(t *testing.T) {
+	algs := SupportedTSIGAlgorithms()
+
+	// 全 9 アルゴリズムが返されること（辞書順。"-" は "." より先に来る）
+	want := []TSIGAlgorithm{
+		TSIGAlgHMACMD5,
+		TSIGAlgHMACSHA1,
+		TSIGAlgHMACSHA224,
+		TSIGAlgHMACSHA256_128,
+		TSIGAlgHMACSHA256,
+		TSIGAlgHMACSHA384_192,
+		TSIGAlgHMACSHA384,
+		TSIGAlgHMACSHA512_256,
+		TSIGAlgHMACSHA512,
+	}
+	if len(algs) != len(want) {
+		t.Fatalf("SupportedTSIGAlgorithms() = %d algorithms, want %d", len(algs), len(want))
+	}
+
+	// 順序は決定論的（辞書順）であること
+	for i, a := range algs {
+		if a != want[i] {
+			t.Errorf("SupportedTSIGAlgorithms()[%d] = %s, want %s", i, a, want[i])
+		}
+	}
+
+	// 返されたアルゴリズムはすべて NewTSIGAlgorithm で正規化して取得できること
+	for _, a := range algs {
+		got, err := NewTSIGAlgorithm(string(a))
+		if err != nil {
+			t.Errorf("NewTSIGAlgorithm(%q) error = %v", a, err)
+			continue
+		}
+		if got != a {
+			t.Errorf("NewTSIGAlgorithm(%q) = %s, want %s", a, got, a)
+		}
+	}
+
+	// アルゴリズム名の重複がないこと
+	seen := make(map[TSIGAlgorithm]bool)
+	for _, a := range algs {
+		if seen[a] {
+			t.Errorf("SupportedTSIGAlgorithms() contains duplicate: %s", a)
+		}
+		seen[a] = true
+	}
+}
