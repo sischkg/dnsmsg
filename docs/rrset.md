@@ -5,8 +5,9 @@ DNSSEC（RFC 4034 Section 6.2）では、同一の (Name, Class, Type) を持つ
 一つの署名対象（RRSet）として扱います。
 
 `dnsmsg` パッケージでは `RRSet` 構造体で RRSet を表現し、正規ワイヤフォーマット
-（canonical wire format）へのシリアライズと、秘密鍵による DNSSEC 署名（RRSIG 生成）を
-サポートします。
+（canonical wire format）へのシリアライズと、秘密鍵による DNSSEC 署名（RRSIG 生成）、
+RRSIG の署名検証をサポートします。ワイルドカードのドメイン名から展開された RRSet の
+署名検証にも対応しています。
 
 ## RRSet 構造体
 
@@ -29,6 +30,10 @@ DNSSEC（RFC 4034 Section 6.2）では、同一の (Name, Class, Type) を持つ
 | `(*RRSet).String() string` | 人間が読める形式で返す |
 | `(*RRSet).CanonicalWireFormat() []byte` | 正規ワイヤフォーマット（RFC 4034 Section 6.2）を返す |
 | `(*RRSet).AppendCanonicalWireFormat(w *WireFormat) uint32` | 正規ワイヤフォーマットを追記 |
+| `SignRRSet(rs *RRSet, signer crypto.Signer, algorithm uint8, keyTag uint16, signersName DomainName, inception, expiration uint32) (*RecordRRSIG, error)` | RRSet に署名して RRSIG を生成 |
+| `VerifyRRSet(rs *RRSet, rrsig *RecordRRSIG, pubkey crypto.PublicKey, now time.Time) error` | RRSIG の署名を検証 |
+| `VerifyRRSetWithDNSKEY(rs *RRSet, rrsig *RecordRRSIG, dnskey *RecordDNSKEY, now time.Time) error` | DNSKEY レコードから公開鍵を読み取り検証 |
+| `SupportedDNSSECAlgorithms() []uint8` | 署名・検証に対応するアルゴリズム一覧 |
 
 ## 正規ワイヤフォーマット
 
@@ -92,6 +97,60 @@ RRSet を秘密鍵で署名し、RRSIG レコードを生成します。
 `OrigTTL`（`rs.TTL`）、`KeyTag`、`SignerName`、`Inception`、`Expiration`、`Signature` が設定されます。
 
 署名データは `rs.CanonicalWireFormat()`（正規ワイヤフォーマット）に対して計算されます。
+
+### ワイルドカードの RRSet に署名する
+
+`rs.Name` の左端のラベルが `*` の場合、`Labels` フィールドはそのワイルドカードラベルを
+数えません（RFC 4034 Section 3.1.3）。
+
+| オーナー名 | `labelCount` | `Labels` |
+|-----------|--------------|----------|
+| `*.example.com.` | 3 | 2 |
+| `*.sub.example.com.` | 4 | 3 |
+| `www.example.com.` | 3 | 3 |
+
+ワイルドカードの RRSet はゾーンには展開されないままのワイルドカード名で格納され、
+その名前のまま署名されます（RFC 4034 Section 6.2）。
+
+### VerifyRRSet
+
+```go
+func VerifyRRSet(rs *RRSet, rrsig *RecordRRSIG, pubkey crypto.PublicKey, now time.Time) error
+func VerifyRRSetWithDNSKEY(rs *RRSet, rrsig *RecordRRSIG, dnskey *RecordDNSKEY, now time.Time) error
+```
+
+RRSIG が RRSet に対する有効な DNSSEC 署名かを検証します。
+`pubkey` は署名鍵の公開鍵（RSA なら `*rsa.PublicKey`、ECDSA なら `*ecdsa.PublicKey`、
+Ed25519 なら `ed25519.PublicKey`）。`now` にゼロ値の `time.Time` を渡すと署名有効期間の検査を省略します。
+
+### ワイルドカードの RRSet の署名を検証する
+
+RRSet の所有者名のラベル数が RRSIG の `Labels` フィールドより大きい場合、その RRSet と
+RRSIG はワイルドカード展開によって生成されたものです（RFC 4035 Section 5.3.4）。
+署名は展開前のワイルドカード名に対して作られているため、`VerifyRRSet` は RFC 4035
+Section 5.3.2 の擬似コードに従って元のオーナー名を復元し、その名前と RRSIG の
+`OrigTTL` を使った RRSet に対して署名を検証します。
+
+復元される名前は、ワイルドカードラベル `*` の後に `Labels` フィールドのラベル数だけ
+右端のラベルを並べた名前です。
+
+| 検証する RRSet の所有者名 | `Labels` | 署名を検証する名前 |
+|--------------------------|----------|--------------------|
+| `www.example.com.` | 2 | `*.example.com.` |
+| `a.b.c.example.com.` | 2 | `*.example.com.` |
+| `www.sub.example.com.` | 3 | `*.sub.example.com.` |
+| `*.example.com.` | 2 | `*.example.com.`（展開されないためそのまま） |
+| `www.example.com.` | 3 | `www.example.com.`（展開されないためそのまま） |
+
+`Labels` フィールドが所有者名のラベル数より大きい RRSIG は使えません（RFC 4035
+Section 5.3.2）。その場合は `VerifyRRSet` はエラーを返します。
+
+ワイルドカードは同じ接末の任意の深さの展開を覆うため（RFC 1034 Section 4.3.3）、
+`*.example.com.` の RRSIG は `www.example.com.` も `www.sub.example.com.` も検証します。
+接末が異なる名前（`www.example.org.` など）は復元される名前が RRSIG のオーナー名と
+一致しないため検証に失敗します。ある名前が実際に署名済みワイルドカードで覆われるかの
+保証は NSEC によるワイルドカード閉包の証明が必要で（RFC 4035 Section 5.3.1）、
+この機能では行いません。
 
 ## 使用例
 
@@ -219,11 +278,15 @@ rrsig, err := dnsmsg.SignRRSet(&rs, signer, key.Algorithm, keyTag, key.Name, inc
 - `crypto/rsa` や `crypto/ecdsa` の `Sign` は `crypto.SHA256` などの `crypto.SignerOpts` を受け取るとデータを「すでにハッシュ済み」とみなすため、`SignRRSet` の内部で RRSet の正規ワイヤフォーマットをハッシュしてから署名します。呼び出し側は生の `[]byte` データを渡す必要はありません。
 - Ed25519（アルゴリズム 15）はハッシュを指定しないアルゴリズムで、生データに対して署名されます。
 - 鍵ファイルの読み込み（`.key` / `.private`）については [dnssec.md](dnssec.md) を参照してください。
-- 現在のところ、RRSIG の検証機能は含まれていません。
+- 署名検証は [zone.md](zone.md) の `Zone.Sign` で生成した RRSIG にもそのまま使えます。
+  署名時と同じオーナー名（ワイルドカードは展開前の名前）で検証してください。
 
 ## 関連リンク
 
 - [index.md](index.md) — パッケージ概要
 - [dnssec.md](dnssec.md) — DNSSEC 鍵ファイル（BIND dnssec-keygen 生成）の読み込み
 - [RFC 4034](https://datatracker.ietf.org/doc/html/rfc4034) — DNS Security (DNSSEC) Resource Records
+- [RFC 4034 Section 3.1.3](https://datatracker.ietf.org/doc/html/rfc4034#section-3.1.3) — The RRSIG RR
 - [RFC 4034 Section 6.2](https://datatracker.ietf.org/doc/html/rfc4034#section-6.2) — Canonical RR Set Form
+- [RFC 4035 Section 5.3.2](https://datatracker.ietf.org/doc/html/rfc4035#section-5.3.2) — Verifying a Zone Signed with a Wildcard
+- [RFC 4035 Section 5.3.4](https://datatracker.ietf.org/doc/html/rfc4035#section-5.3.4) — Reconstructing the Original Owner Name
