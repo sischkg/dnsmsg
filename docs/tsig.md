@@ -45,6 +45,7 @@ MAC Size / Other Len はワイヤフォーマット上の長さフィールド�
 | `Message.VerifyTSIG(key TSIGKey, opts *TSIGVerifyOptions) error` | メッセージの TSIG レコードを検証。成功なら nil |
 | `VerifyTSIG(w WireFormat, key TSIGKey, opts *TSIGVerifyOptions) error` | ワイヤフォーマットの生メッセージを検証（パッケージ関数） |
 | `NewUnsignedTSIGResponse(...) (ResourceRecord, error)` | MAC なしの TSIG エラー応答レコード（BADKEY / BADTIME 等）を作る |
+| `SupportedTSIGAlgorithms() []TSIGAlgorithm` | この実装でサポートするTSIGアルゴリズムの一覧を、決定論的な順序（辞書順）で返す |
 
 ### TSIGOptions（署名用）
 
@@ -80,6 +81,10 @@ MAC Size / Other Len はワイヤフォーマット上の長さフィールド�
 | `TSIGAlgHMACSHA512_256` | `"hmac-sha512-256."` | HMAC-SHA512（MAC 256 bit 短縮） |
 
 `TSIGDefaultFudge` は 300（5 分）です。
+
+`SupportedTSIGAlgorithms()` で、この実装がサポートする全アルゴリズムを
+決定論的な順序（辞書順）で取得できます。返されるスライスはすべて
+`NewTSIGAlgorithm` で正規化して取得可能であり、重複はありません。
 
 ### TSIG エラー定数（`record-tsig.go`）
 
