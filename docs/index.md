@@ -35,6 +35,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | SOA      | `TYPE_SOA` (6)   | `RecordSOA`    |
 | MX       | `TYPE_MX` (15)   | `RecordMX`     |
 | AAAA     | `TYPE_AAAA` (28) | `RecordAAAA`   |
+| NSEC     | `TYPE_NSEC` (32) | `RecordNSEC`   |
 | OPT      | `TYPE_OPT` (41)  | `RecordOPT`（[edns.md](edns.md) 参照） |
 | DS       | `TYPE_DS` (43)   | `RecordDS`     |
 | RRSIG    | `TYPE_RRSIG` (46)| `RecordRRSIG`  |
@@ -46,6 +47,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 |----------|------|
 | [index.md](index.md) | 本ページ。パッケージの概要、クイックスタート、主要な型の一覧 |
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
+| [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |
 | [tsig.md](tsig.md) | TSIG による DNS メッセージの署名と検証（RFC 8945） |
 
 ## クイックスタート
