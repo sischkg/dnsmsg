@@ -29,6 +29,10 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
   - `RRSet` 構造体と正規ワイヤフォーマット（RFC 4034 Section 6.2）
   - `SignRRSet` で RRSet に署名し RRSIG レコードを生成
   - `SupportedDNSSECAlgorithms()` で対応アルゴリズム一覧を取得
+- DNS ゾーン管理（`docs/zone.md`）:
+  - `Zone` 構造体（オリジン、デフォルト TTL、RRSet コレクション）
+  - `AddRRSet` / `FindRRSet` / `RemoveRRSet` / `Equal` / `CanonicalWireFormat`
+  - `ResourceRecordsToZone` で `[]ResourceRecord` を RRSet にグループ化して Zone を構築
 - UDP / TCP による DNS クエリ送信（`SendQuery`）
 
 ## サポートするレコードタイプ
@@ -58,6 +62,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [index.md](index.md) | 本ページ。パッケージの概要、クイックスタート、主要な型の一覧 |
 | [dnssec.md](dnssec.md) | DNSSEC 鍵ファイル（BIND dnssec-keygen 生成）の読み込み（`.key` / `.private`） |
 | [rrset.md](rrset.md) | RRSet と DNSSEC 署名（正規ワイヤフォーマット、SignRRSet、SupportedDNSSECAlgorithms） |
+| [zone.md](zone.md) | DNS ゾーン管理（Zone 構造体、RRSet コレクション、ResourceRecordsToZone） |
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
 | [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
