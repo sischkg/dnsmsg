@@ -2,6 +2,7 @@ package dnsmsg
 
 import (
 	"bytes"
+	"crypto"
 	"fmt"
 	"sort"
 )
@@ -165,4 +166,156 @@ func ResourceRecordsToZone(origin DomainName, defaultTTL uint32, records []Resou
 	}
 
 	return z
+}
+
+// ownerNamesWithTypes はゾーン内の各ユニークなオーナー名と、その名前に
+// 存在する RR タイプの集合を返す。結果はオーナー名の canonical
+// ワイヤフォーマット順でソートされる。
+func (z Zone) ownerNamesWithTypes() ([]DomainName, map[string][]ResourceType) {
+	nameSet := make(map[string]struct{})
+	typesMap := make(map[string][]ResourceType)
+
+	for _, rs := range z.RRsets {
+		nameKey := rs.Name.String()
+		if _, ok := nameSet[nameKey]; !ok {
+			nameSet[nameKey] = struct{}{}
+		}
+		typesMap[nameKey] = append(typesMap[nameKey], rs.Type)
+	}
+
+	names := make([]DomainName, 0, len(nameSet))
+	for nameKey := range nameSet {
+		name, err := NewDomainNameFromString(nameKey)
+		if err != nil {
+			continue
+		}
+		names = append(names, name)
+	}
+
+	// canonical ワイヤフォーマット順でソート
+	sort.SliceStable(names, func(i, j int) bool {
+		return bytes.Compare(names[i].CanonicalWireFormat(), names[j].CanonicalWireFormat()) < 0
+	})
+
+	// 重複タイプを排除してソート済みにする
+	for nameKey, types := range typesMap {
+		seen := make(map[ResourceType]struct{})
+		unique := make([]ResourceType, 0, len(types))
+		for _, typ := range types {
+			if _, ok := seen[typ]; !ok {
+				seen[typ] = struct{}{}
+				unique = append(unique, typ)
+			}
+		}
+		sort.Slice(unique, func(i, j int) bool { return unique[i] < unique[j] })
+		typesMap[nameKey] = unique
+	}
+
+	return names, typesMap
+}
+
+// nextOwnerName はソート済みのオーナー名リストにおいて、name の次に
+// 来るオーナー名を返す。最後の要素の場合は orig を返す（ゾーンの
+// 終端はオリジンに戻る）。
+func (z Zone) nextOwnerName(names []DomainName, name DomainName, orig DomainName) DomainName {
+	for i, n := range names {
+		if n.Equal(name) {
+			if i+1 < len(names) {
+				return names[i+1]
+			}
+			return orig
+		}
+	}
+	return orig
+}
+
+// Sign はゾーン内の各 RRSet に RRSIG を生成し、各オーナー名に NSEC
+// レコードとその RRSIG を生成して、すべての署名レコードを返す
+// (RFC 4034)。戻り値の []ResourceRecord には以下が含まれる：
+//
+//   - 各 RRSet に対する RRSIG レコード
+//   - 各オーナー名に対する NSEC レコード
+//   - 各 NSEC レコードに対する RRSIG レコード
+//
+// signer は crypto.Signer を実装する秘密鍵（*rsa.PrivateKey や
+// *ecdsa.PrivateKey など）。algorithm は DNSSEC アルゴリズム番号、
+// keyTag は署名鍵の DNSKEY キータグ、signerName は署名鍵のオーナー名、
+// inception / expiration は署名の有効期間。
+//
+// ゾーンに RRSet が含まれていない場合は空のスライスを返す。
+func (z Zone) Sign(signer crypto.Signer, algorithm uint8, keyTag uint16, signerName DomainName, inception, expiration uint32) ([]ResourceRecord, error) {
+	if signer == nil {
+		return nil, fmt.Errorf("signer is nil")
+	}
+
+	_, ok := dnssecAlgorithmHash(algorithm)
+	if !ok {
+		return nil, fmt.Errorf("unsupported DNSSEC algorithm %d for zone signing", algorithm)
+	}
+
+	var records []ResourceRecord
+
+	// 1) 各 RRSet に対して RRSIG を生成
+	for _, rs := range z.RRsets {
+		rrsig, err := SignRRSet(&rs, signer, algorithm, keyTag, signerName, inception, expiration)
+		if err != nil {
+			return nil, fmt.Errorf("cannot sign RRSet %s %s: %w", rs.Name, rs.Type, err)
+		}
+
+		rrsigRR := ResourceRecord{
+			Name:  rs.Name,
+			Class: rs.Class,
+			Type:  TYPE_RRSIG,
+			TTL:   rs.TTL,
+			RData: *rrsig,
+		}
+		records = append(records, rrsigRR)
+	}
+
+	// 2) 各オーナー名に対して NSEC レコードを生成
+	names, typesMap := z.ownerNamesWithTypes()
+	if len(names) == 0 {
+		return records, nil
+	}
+
+	for _, name := range names {
+		nameKey := name.String()
+		types := typesMap[nameKey]
+		nextName := z.nextOwnerName(names, name, z.Origin)
+
+		nsec := NewRecordNSEC(nextName, types)
+
+		nsecRR := ResourceRecord{
+			Name:  name,
+			Class: z.DefaultTTLClass(),
+			Type:  TYPE_NSEC,
+			TTL:   z.DefaultTTL,
+			RData: nsec,
+		}
+		records = append(records, nsecRR)
+
+		// 3) NSEC レコードに対する RRSIG を生成
+		nsecRS := NewRRSet(name, z.DefaultTTLClass(), TYPE_NSEC, z.DefaultTTL, nsec)
+		nsecRRSIG, err := SignRRSet(&nsecRS, signer, algorithm, keyTag, signerName, inception, expiration)
+		if err != nil {
+			return nil, fmt.Errorf("cannot sign NSEC for %s: %w", name, err)
+		}
+
+		nsecRRSIGRR := ResourceRecord{
+			Name:  name,
+			Class: z.DefaultTTLClass(),
+			Type:  TYPE_RRSIG,
+			TTL:   z.DefaultTTL,
+			RData: *nsecRRSIG,
+		}
+		records = append(records, nsecRRSIGRR)
+	}
+
+	return records, nil
+}
+
+// DefaultTTLClass はゾーンのデフォルトクラスを返す。現在のところ
+// 常に CLASS_IN を返す。
+func (z Zone) DefaultTTLClass() ResourceClass {
+	return CLASS_IN
 }
