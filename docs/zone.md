@@ -220,6 +220,122 @@ func main() {
 | 非対応アルゴリズム | `unsupported DNSSEC algorithm N for zone signing` |
 | 署名失敗 | `cannot sign RRSet ...: <原因>` または `cannot sign NSEC for ...: <原因>` |
 
+## ゾーンの NSEC3 署名（Zone.SignNSEC3）
+
+`Zone.SignNSEC3()` はゾーンを NSEC3 (RFC 5155) で署名する。各 RRSet に RRSIG を生成し、各オーナー名（ハッシュ済み）に NSEC3 レコードとその RRSIG を生成し、さらに NSEC3PARAM レコードとその RRSIG を生成して、すべての署名レコードを `[]ResourceRecord` で返す。
+
+### Zone.SignNSEC3 のシグネチャ
+
+```go
+func (z Zone) SignNSEC3(signer crypto.Signer, algorithm uint8, keyTag uint16, signerName DomainName,
+    inception, expiration uint32, hashAlgorithm uint8, flags uint8, iterations uint16, salt []byte) ([]ResourceRecord, error)
+```
+
+| 引数 | 型 | 内容 |
+|------|----|------|
+| `signer` | `crypto.Signer` | 秘密鍵（*rsa.PrivateKey や *ecdsa.PrivateKey など） |
+| `algorithm` | `uint8` | DNSSEC アルゴリズム番号（`SupportedDNSSECAlgorithms()` 参照） |
+| `keyTag` | `uint16` | 署名鍵の DNSKEY キータグ |
+| `signerName` | `DomainName` | 署名鍵のオーナー名（DNSKEY レコードのオーナー） |
+| `inception` | `uint32` | 署名開始時刻（Unix秒、0なら現在時刻） |
+| `expiration` | `uint32` | 署名有効期限（Unix秒、0なら無期限） |
+| `hashAlgorithm` | `uint8` | NSEC3 ハッシュアルゴリズム（`HashAlgorithmSHA1` = 1） |
+| `flags` | `uint8` | NSEC3 フラグ（`FlagOptOut` = 0x01、オプトアウト） |
+| `iterations` | `uint16` | ハッシュ反復回数（0不可） |
+| `salt` | `[]byte` | ソルト値（空スライス可） |
+
+### 戻り値
+
+`[]ResourceRecord` には以下が含まれる：
+
+1. 各 RRSet に対する RRSIG レコード（Type, Name, TTL は元の RRSet を継承）
+2. 各オーナー名に対する NSEC3 レコード（TTL はゾーンの DefaultTTL）
+3. 各 NSEC3 レコードに対する RRSIG レコード
+4. ゾーンアペックスに対する NSEC3PARAM レコード（TTL はゾーンの DefaultTTL）
+5. NSEC3PARAM レコードに対する RRSIG レコード
+
+NSEC3 レコードの Next Hashed Owner Name は、SHA-1 ハッシュ後の値を canonical 順でソートした際の次のオーナー名を指し、最後のオーナー名の場合は最初のオーナー名に戻る（輪郭を閉じる）。
+
+### 使用例
+
+```go
+package main
+
+import (
+	"crypto/rand"
+	"crypto/rsa"
+	"fmt"
+	"log"
+
+	"github.com/sischkg/dnsmsg"
+)
+
+func main() {
+	origin, _ := dnsmsg.NewDomainNameFromString("example.com.")
+
+	// ゾーンを構築
+	z := dnsmsg.NewZone(origin, 3600)
+
+	www, _ := dnsmsg.NewDomainNameFromString("www.example.com.")
+	z.AddRRSet(dnsmsg.NewRRSet(
+		www, dnsmsg.CLASS_IN, dnsmsg.TYPE_A, 3600,
+		dnsmsg.NewRecordA([4]byte{192, 0, 2, 1}),
+	))
+
+	ns, _ := dnsmsg.NewDomainNameFromString("ns.example.com.")
+	z.AddRRSet(dnsmsg.NewRRSet(
+		origin, dnsmsg.CLASS_IN, dnsmsg.TYPE_NS, 86400,
+		dnsmsg.NewRecordNS(ns),
+	))
+
+	// 秘密鍵で NSEC3 署名
+	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	signerName, _ := dnsmsg.NewDomainNameFromString("example.com.")
+	salt := []byte{0x01, 0x02}
+
+	signedRecords, err := z.SignNSEC3(
+		privateKey,        // crypto.Signer
+		8,                 // RSASHA256
+		12345,             // キータグ
+		signerName,        // 署名鍵のオーナー名
+		1700000000,        // inception
+		1800000000,        // expiration
+		1,                 // SHA-1
+		0,                 // フラグ（オプトアウトなし）
+		1,                 // 反復回数
+		salt,              // ソルト
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	for _, rr := range signedRecords {
+		fmt.Println(rr) // RRSIG / NSEC3 / NSEC3 の RRSIG / NSEC3PARAM / NSEC3PARAM の RRSIG
+	}
+}
+```
+
+### エラーハンドリング
+
+| ケース | エラー |
+|------|--------|
+| `signer` が nil | `signer is nil` |
+| 非対応 DNSSEC アルゴリズム | `unsupported DNSSEC algorithm N for NSEC3 zone signing` |
+| 非対応 NSEC3 ハッシュアルゴリズム | `unsupported NSEC3 hash algorithm N` |
+| iterations が 0 | `NSEC3 iterations must be non-zero` |
+| 署名失敗 | `cannot sign RRSet ...: <原因>` または `cannot sign NSEC3 for ...: <原因>` または `cannot sign NSEC3PARAM: <原因>` |
+
+### NSEC3 ハッシュ
+
+NSEC3 ハッシュは RFC 5155 Section 5 に従い、SHA-1 を使用して計算される：
+
+```
+H(0) = SHA-1(canonical_name || salt)
+H(i) = SHA-1(H(i-1) || salt) for i = 1 to iterations-1
+```
+
+`canonical_name` は小文字・圧縮なしのワイヤフォーマット（`DomainName.CanonicalWireFormat()`）を使用する。
+
 ## エラーハンドリング（Zone 全般）
 
 - `FindRRSet` は見つからない場合は `false` を返す（エラーではない）
@@ -234,4 +350,6 @@ func main() {
 - [RFC 4034](https://datatracker.ietf.org/doc/html/rfc4034) — DNS Security (DNSSEC) Resource Records
 - [RFC 4034 Section 5.2](https://datatracker.ietf.org/doc/html/rfc4034#section-5.2) — NSEC Record
 - [RFC 4034 Section 6.2](https://datatracker.ietf.org/doc/html/rfc4034#section-6.2) — Canonical RR Set Form
+- [RFC 5155](https://datatracker.ietf.org/doc/html/rfc5155) — DNS Security (DNSSEC) Hashed Authenticated Denial of Existence (NSEC3)
+- [RFC 5155 Section 5](https://datatracker.ietf.org/doc/html/rfc5155#section-5) — NSEC3 Hash Algorithm
 
