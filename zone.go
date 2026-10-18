@@ -3,6 +3,7 @@ package dnsmsg
 import (
 	"bytes"
 	"crypto"
+	"crypto/sha1"
 	"fmt"
 	"sort"
 )
@@ -318,4 +319,210 @@ func (z Zone) Sign(signer crypto.Signer, algorithm uint8, keyTag uint16, signerN
 // 常に CLASS_IN を返す。
 func (z Zone) DefaultTTLClass() ResourceClass {
 	return CLASS_IN
+}
+
+// nsec3Hash は RFC 5155 Section 5 に従ってドメイン名の NSEC3 ハッシュを
+// 計算する。
+//
+//   H(0) = SHA-1(canonical_name || salt)
+//   H(i) = SHA-1(H(i-1) || salt) for i = 1 to iterations-1
+//
+// canonical_name は小文字・圧縮なしのワイヤフォーマット（DomainName.
+// CanonicalWireFormat）を使用する。
+func nsec3Hash(name DomainName, salt []byte, iterations uint16) []byte {
+	nameWire := name.CanonicalWireFormat()
+
+	// H(0) = SHA-1(name || salt)
+	h := sha1.New()
+	h.Write(nameWire)
+	h.Write(salt)
+	digest := h.Sum(nil)
+
+	// H(i) = SHA-1(H(i-1) || salt) for remaining iterations
+	for i := uint16(1); i < iterations; i++ {
+		h = sha1.New()
+		h.Write(digest)
+		h.Write(salt)
+		digest = h.Sum(nil)
+	}
+
+	return digest
+}
+
+// nsec3HashToLabel は NSEC3 ハッシュ値を長さプレフィックス付きラベル
+// のワイヤフォーマットに変換する（先頭にハッシュ長の1オクテットを付ける）。
+func nsec3HashToLabel(hash []byte) []byte {
+	label := make([]byte, 0, 1+len(hash))
+	label = append(label, uint8(len(hash)))
+	label = append(label, hash...)
+	return label
+}
+
+// SignNSEC3 はゾーンを NSEC3 (RFC 5155) で署名する。
+// 各 RRSet に RRSIG を生成し、各オーナー名に NSEC3 レコードとその RRSIG を
+// 生成し、さらに NSEC3PARAM レコードとその RRSIG を生成して、
+// すべての署名レコードを返す。
+//
+// 戻り値の []ResourceRecord には以下が含まれる：
+//
+//   - 各 RRSet に対する RRSIG レコード
+//   - 各オーナー名（ハッシュ済み）に対する NSEC3 レコード
+//   - 各 NSEC3 レコードに対する RRSIG レコード
+//   - ゾーンアペックスに対する NSEC3PARAM レコード
+//   - NSEC3PARAM レコードに対する RRSIG レコード
+//
+// signer は crypto.Signer を実装する秘密鍵。algorithm は DNSSEC アルゴリズム
+// 番号。keyTag は署名鍵の DNSKEY キータグ。signerName は署名鍵のオーナー名。
+// inception / expiration は署名の有効期間。hashAlgorithm は NSEC3 ハッシュ
+// アルゴリズム（1 = SHA-1）。flags は NSEC3 フラグ（0x01 = opt-out）。iterations
+// はハッシュ反復回数。salt はソルト値。
+//
+// ゾーンに RRSet が含まれていない場合は空のスライスを返す。
+func (z Zone) SignNSEC3(signer crypto.Signer, algorithm uint8, keyTag uint16, signerName DomainName,
+	inception, expiration uint32, hashAlgorithm uint8, flags uint8, iterations uint16, salt []byte) ([]ResourceRecord, error) {
+
+	if signer == nil {
+		return nil, fmt.Errorf("signer is nil")
+	}
+
+	_, ok := dnssecAlgorithmHash(algorithm)
+	if !ok {
+		return nil, fmt.Errorf("unsupported DNSSEC algorithm %d for NSEC3 zone signing", algorithm)
+	}
+
+	if hashAlgorithm != HashAlgorithmSHA1 {
+		return nil, fmt.Errorf("unsupported NSEC3 hash algorithm %d", hashAlgorithm)
+	}
+
+	if iterations == 0 {
+		return nil, fmt.Errorf("NSEC3 iterations must be non-zero")
+	}
+
+	var records []ResourceRecord
+
+	// 1) 各 RRSet に対して RRSIG を生成
+	for _, rs := range z.RRsets {
+		rrsig, err := SignRRSet(&rs, signer, algorithm, keyTag, signerName, inception, expiration)
+		if err != nil {
+			return nil, fmt.Errorf("cannot sign RRSet %s %s: %w", rs.Name, rs.Type, err)
+		}
+
+		rrsigRR := ResourceRecord{
+			Name:  rs.Name,
+			Class: rs.Class,
+			Type:  TYPE_RRSIG,
+			TTL:   rs.TTL,
+			RData: *rrsig,
+		}
+		records = append(records, rrsigRR)
+	}
+
+	// 2) オーナー名とタイプを収集し、NSEC3 ハッシュでソート
+	names, typesMap := z.ownerNamesWithTypes()
+	if len(names) == 0 {
+		return records, nil
+	}
+
+	// 各オーナー名を NSEC3 ハッシュし、ハッシュ値でソート
+	type hashedEntry struct {
+		name     DomainName
+		nameKey  string
+		hash     []byte
+		types    []ResourceType
+	}
+	hashed := make([]hashedEntry, 0, len(names))
+	for _, name := range names {
+		nameKey := name.String()
+		hash := nsec3Hash(name, salt, iterations)
+		hashed = append(hashed, hashedEntry{
+			name:    name,
+			nameKey: nameKey,
+			hash:    hash,
+			types:   typesMap[nameKey],
+		})
+	}
+
+	sort.SliceStable(hashed, func(i, j int) bool {
+		return bytes.Compare(hashed[i].hash, hashed[j].hash) < 0
+	})
+
+	// 3) 各オーナー名に対して NSEC3 レコードを生成
+	for i, entry := range hashed {
+		// 次のハッシュ済みオーナー名（最後は最初のものに戻る）
+		var nextHash []byte
+		if i+1 < len(hashed) {
+			nextHash = hashed[i+1].hash
+		} else {
+			nextHash = hashed[0].hash
+		}
+
+		nsec3 := NewRecordNSEC3(
+			hashAlgorithm,
+			flags,
+			iterations,
+			salt,
+			nsec3HashToLabel(nextHash),
+			entry.types,
+		)
+
+		nsec3RR := ResourceRecord{
+			Name:  entry.name,
+			Class: z.DefaultTTLClass(),
+			Type:  TYPE_NSEC3,
+			TTL:   z.DefaultTTL,
+			RData: nsec3,
+		}
+		records = append(records, nsec3RR)
+
+		// NSEC3 レコードに対する RRSIG を生成
+		nsec3RS := NewRRSet(entry.name, z.DefaultTTLClass(), TYPE_NSEC3, z.DefaultTTL, nsec3)
+		nsec3RRSIG, err := SignRRSet(&nsec3RS, signer, algorithm, keyTag, signerName, inception, expiration)
+		if err != nil {
+			return nil, fmt.Errorf("cannot sign NSEC3 for %s: %w", entry.name, err)
+		}
+
+		nsec3RRSIGRR := ResourceRecord{
+			Name:  entry.name,
+			Class: z.DefaultTTLClass(),
+			Type:  TYPE_RRSIG,
+			TTL:   z.DefaultTTL,
+			RData: *nsec3RRSIG,
+		}
+		records = append(records, nsec3RRSIGRR)
+	}
+
+	// 4) ゾーンアペックスに対する NSEC3PARAM レコードを生成
+	apexTypes, ok := typesMap[z.Origin.String()]
+	if !ok {
+		// アペックスにレコードがなくても NSEC3PARAM は生成する（空のタイプリスト）
+		apexTypes = nil
+	}
+	nsec3param := NewRecordNSEC3PARAM(hashAlgorithm, flags, iterations, salt, apexTypes)
+
+	nsec3paramRR := ResourceRecord{
+		Name:  z.Origin,
+		Class: z.DefaultTTLClass(),
+		Type:  TYPE_NSEC3PARAM,
+		TTL:   z.DefaultTTL,
+		RData: nsec3param,
+	}
+	records = append(records, nsec3paramRR)
+
+	// NSEC3PARAM レコードに対する RRSIG を生成
+	nsec3paramRS := NewRRSet(z.Origin, z.DefaultTTLClass(), TYPE_NSEC3PARAM, z.DefaultTTL, nsec3param)
+	nsec3paramRRSIG, err := SignRRSet(&nsec3paramRS, signer, algorithm, keyTag, signerName, inception, expiration)
+	if err != nil {
+		return nil, fmt.Errorf("cannot sign NSEC3PARAM: %w", err)
+	}
+
+	nsec3paramRRSIGRR := ResourceRecord{
+		Name:  z.Origin,
+		Class: z.DefaultTTLClass(),
+		Type:  TYPE_RRSIG,
+		TTL:   z.DefaultTTL,
+		RData: *nsec3paramRRSIG,
+	}
+	records = append(records, nsec3paramRRSIGRR)
+
+	return records, nil
 }
