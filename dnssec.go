@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -253,6 +254,17 @@ func dnssecAlgorithmHash(algorithm uint8) (crypto.Hash, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// SupportedDNSSECAlgorithms returns the list of DNSSEC algorithm numbers this
+// implementation can sign with, in ascending numeric order.  All returned
+// algorithms are accepted by dnssecAlgorithmHash and SignRRSet.
+func SupportedDNSSECAlgorithms() []uint8 {
+	algs := []uint8{5, 7, 8, 10, 13, 14, 15}
+	sort.Slice(algs, func(i, j int) bool {
+		return algs[i] < algs[j]
+	})
+	return algs
 }
 
 // labelCount returns the number of labels in the domain name, excluding the

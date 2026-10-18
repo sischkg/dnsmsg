@@ -282,3 +282,35 @@ func TestReadPrivateKeyFileNotFound(t *testing.T) {
 		t.Errorf("ReadPrivateKeyFile() expected error for missing file, got nil")
 	}
 }
+
+func TestSupportedDNSSECAlgorithms(t *testing.T) {
+	algs := SupportedDNSSECAlgorithms()
+
+	// 期待する対応アルゴリズム（昇順）
+	want := []uint8{5, 7, 8, 10, 13, 14, 15}
+	if len(algs) != len(want) {
+		t.Errorf("SupportedDNSSECAlgorithms() = %v, want %v", algs, want)
+		return
+	}
+	for i := range want {
+		if algs[i] != want[i] {
+			t.Errorf("SupportedDNSSECAlgorithms()[%d] = %d, want %d", i, algs[i], want[i])
+		}
+	}
+
+	// すべて返されたアルゴリズムが SignRRSet で使えること（dnssecAlgorithmHash で ok == true）
+	for _, alg := range algs {
+		if _, ok := dnssecAlgorithmHash(alg); !ok {
+			t.Errorf("algorithm %d is in SupportedDNSSECAlgorithms but not supported by dnssecAlgorithmHash", alg)
+		}
+	}
+
+	// サポートされていないアルゴリズムが含まれていないこと
+	for _, unsupported := range []uint8{1, 2, 3, 4, 6, 9, 11, 12, 16} {
+		for _, alg := range algs {
+			if alg == unsupported {
+				t.Errorf("SupportedDNSSECAlgorithms() contains unsupported algorithm %d", alg)
+			}
+		}
+	}
+}
