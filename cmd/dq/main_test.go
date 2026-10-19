@@ -193,8 +193,8 @@ func TestReorderArgs(t *testing.T) {
 		},
 		{
 			name: "options after the domain name",
-			args: []string{"example.com", "-r", "-p", "5353", "--nsid"},
-			want: []string{"-r", "-p", "5353", "--nsid", "example.com"},
+			args: []string{"example.com", "-r", "-p", "5353", "-nsid"},
+			want: []string{"-r", "-p", "5353", "-nsid", "example.com"},
 		},
 		{
 			name: "an option value stays with its option",
@@ -207,9 +207,9 @@ func TestReorderArgs(t *testing.T) {
 			want: []string{"-p=5353", "example.com"},
 		},
 		{
-			name: "--timeout keeps its value",
-			args: []string{"example.com", "--timeout", "2", "-r"},
-			want: []string{"--timeout", "2", "-r", "example.com"},
+			name: "-timeout keeps its value",
+			args: []string{"example.com", "-timeout", "2", "-r"},
+			want: []string{"-timeout", "2", "-r", "example.com"},
 		},
 		{
 			name: "everything after -- is a positional argument",
@@ -256,7 +256,7 @@ func TestParseArgs(t *testing.T) {
 		},
 		{
 			name: "all options",
-			args: []string{"-s", "ns.example", "-p", "5353", "-c", "CH", "-t", "AAAA", "-r", "--tcp", "example.com"},
+			args: []string{"-s", "ns.example", "-p", "5353", "-c", "CH", "-t", "AAAA", "-r", "-tcp", "example.com"},
 			want: options{
 				server:    "ns.example",
 				port:      5353,
@@ -271,13 +271,13 @@ func TestParseArgs(t *testing.T) {
 			},
 		},
 		{
-			name: "explicit --udp",
-			args: []string{"--udp", "example.com"},
+			name: "explicit -udp",
+			args: []string{"-udp", "example.com"},
 			want: defaults,
 		},
 		{
-			name: "--no-edns",
-			args: []string{"--no-edns", "example.com"},
+			name: "-no-edns",
+			args: []string{"-no-edns", "example.com"},
 			want: func() options {
 				o := defaults
 				o.edns = false
@@ -285,8 +285,8 @@ func TestParseArgs(t *testing.T) {
 			}(),
 		},
 		{
-			name: "--edns=false",
-			args: []string{"--edns=false", "example.com"},
+			name: "-edns=false",
+			args: []string{"-edns=false", "example.com"},
 			want: func() options {
 				o := defaults
 				o.edns = false
@@ -294,8 +294,8 @@ func TestParseArgs(t *testing.T) {
 			}(),
 		},
 		{
-			name: "--nsid",
-			args: []string{"--nsid", "example.com"},
+			name: "-nsid",
+			args: []string{"-nsid", "example.com"},
 			want: func() options {
 				o := defaults
 				o.nsid = true
@@ -308,8 +308,8 @@ func TestParseArgs(t *testing.T) {
 			want: defaults,
 		},
 		{
-			name: "--timeout in whole seconds",
-			args: []string{"--timeout", "2", "example.com"},
+			name: "-timeout in whole seconds",
+			args: []string{"-timeout", "2", "example.com"},
 			want: func() options {
 				o := defaults
 				o.timeout = 2 * time.Second
@@ -317,8 +317,8 @@ func TestParseArgs(t *testing.T) {
 			}(),
 		},
 		{
-			name: "--timeout in a fraction of a second",
-			args: []string{"example.com", "--timeout", "0.25"},
+			name: "-timeout in a fraction of a second",
+			args: []string{"example.com", "-timeout", "0.25"},
 			want: func() options {
 				o := defaults
 				o.timeout = 250 * time.Millisecond
@@ -326,8 +326,8 @@ func TestParseArgs(t *testing.T) {
 			}(),
 		},
 		{
-			name: "--timeout 0 means no timeout",
-			args: []string{"--timeout=0", "example.com"},
+			name: "-timeout 0 means no timeout",
+			args: []string{"-timeout=0", "example.com"},
 			want: func() options {
 				o := defaults
 				o.timeout = 0
@@ -370,19 +370,19 @@ func TestParseArgs(t *testing.T) {
 			}(),
 		},
 		{
-			name:    "--tcp and --udp",
-			args:    []string{"--tcp", "--udp", "example.com"},
-			wantErr: "--tcp と --udp は同時に指定できません",
+			name:    "-tcp and -udp",
+			args:    []string{"-tcp", "-udp", "example.com"},
+			wantErr: "-tcp と -udp は同時に指定できません",
 		},
 		{
-			name:    "--edns and --no-edns",
-			args:    []string{"--edns", "--no-edns", "example.com"},
-			wantErr: "--edns と --no-edns は同時に指定できません",
+			name:    "-edns and -no-edns",
+			args:    []string{"-edns", "-no-edns", "example.com"},
+			wantErr: "-edns と -no-edns は同時に指定できません",
 		},
 		{
-			name:    "--nsid and --no-edns",
-			args:    []string{"--nsid", "--no-edns", "example.com"},
-			wantErr: "--nsid は --no-edns と同時に指定できません",
+			name:    "-nsid and -no-edns",
+			args:    []string{"-nsid", "-no-edns", "example.com"},
+			wantErr: "-nsid は -no-edns と同時に指定できません",
 		},
 		{
 			name:    "unsupported output format",
@@ -406,17 +406,17 @@ func TestParseArgs(t *testing.T) {
 		},
 		{
 			name:    "negative timeout",
-			args:    []string{"--timeout", "-1", "example.com"},
-			wantErr: "--timeout -1 は 0 秒以上で指定してください",
+			args:    []string{"-timeout", "-1", "example.com"},
+			wantErr: "-timeout -1 は 0 秒以上で指定してください",
 		},
 		{
 			name:    "timeout is not a number",
-			args:    []string{"--timeout", "abc", "example.com"},
+			args:    []string{"-timeout", "abc", "example.com"},
 			wantErr: "invalid value",
 		},
 		{
 			name:    "unknown option",
-			args:    []string{"--quic", "example.com"},
+			args:    []string{"-quic", "example.com"},
 			wantErr: "flag provided but not defined",
 		},
 	}
@@ -445,6 +445,8 @@ func TestParseArgs(t *testing.T) {
 }
 
 func TestParseArgsHelp(t *testing.T) {
+	// Options are documented with one "-", but the flag package accepts the
+	// doubled form too, so both spellings print the usage.
 	for _, arg := range []string{"-h", "--help"} {
 		var stderr bytes.Buffer
 		_, err := parseArgs([]string{arg, "example.com"}, &stderr)
@@ -694,10 +696,10 @@ func TestNewMessageID(t *testing.T) {
 // TestRunJSON runs dq against a stub name server over both transports and
 // checks the JSON document it prints.
 func TestRunJSON(t *testing.T) {
-	for _, transport := range []string{"--tcp", "--udp"} {
+	for _, transport := range []string{"-tcp", "-udp"} {
 		t.Run(transport, func(t *testing.T) {
 			var port uint16
-			if transport == "--tcp" {
+			if transport == "-tcp" {
 				// A reply of several hundred bytes arrives in small pieces.
 				port = serveTCP(t, func(q dnsmsg.Message) dnsmsg.Message { return stubAnswer(q, 20) }, 7)
 			} else {
@@ -705,7 +707,7 @@ func TestRunJSON(t *testing.T) {
 			}
 
 			var stdout, stderr bytes.Buffer
-			args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), transport, "-r", "--nsid", "example.com"}
+			args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), transport, "-r", "-nsid", "example.com"}
 			if code := run(args, &stdout, &stderr); code != 0 {
 				t.Fatalf("run(%v) exit code = %d, want 0\nstderr: %s", args, code, stderr.String())
 			}
@@ -749,7 +751,7 @@ func TestRunJSON(t *testing.T) {
 				t.Errorf("response header = ID %#04x QR %d RA %d, want ID %#04x QR 1 RA 1", r.ID, r.QR, r.RA, q.ID)
 			}
 			wantAnswers := 20
-			if transport == "--udp" {
+			if transport == "-udp" {
 				wantAnswers = 2
 			}
 			if r.ANCOUNT != uint16(wantAnswers) || len(r.AnswerSection) != wantAnswers {
@@ -818,7 +820,7 @@ func TestRunQueryFailure(t *testing.T) {
 	port := closedTCPPort(t)
 
 	var stdout, stderr bytes.Buffer
-	args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), "--tcp", "example.com"}
+	args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), "-tcp", "example.com"}
 	if code := run(args, &stdout, &stderr); code != 1 {
 		t.Fatalf("run(%v) exit code = %d, want 1\nstderr: %s", args, code, stderr.String())
 	}
@@ -873,7 +875,7 @@ func TestRunNoAnswer(t *testing.T) {
 	t.Cleanup(func() { queryTimeout = old })
 
 	var stdout, stderr bytes.Buffer
-	args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), "--tcp", "example.com"}
+	args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), "-tcp", "example.com"}
 
 	start := time.Now()
 	code := run(args, &stdout, &stderr)
@@ -894,8 +896,8 @@ func TestRunNoAnswer(t *testing.T) {
 	}
 }
 
-// TestRunTimeoutOption checks that --timeout replaces the default query timeout:
-// a short --timeout gives up on a server that answers late, and --timeout 0
+// TestRunTimeoutOption checks that -timeout replaces the default query timeout:
+// a short -timeout gives up on a server that answers late, and -timeout 0
 // keeps waiting for it even though the default timeout is shorter than the
 // answer delay.
 func TestRunTimeoutOption(t *testing.T) {
@@ -913,7 +915,7 @@ func TestRunTimeoutOption(t *testing.T) {
 		wantResp bool
 	}{
 		{
-			name:     "a short --timeout outlives the default one",
+			name:     "a short -timeout outlives the default one",
 			timeout:  "0.2",
 			delay:    600 * time.Millisecond,
 			wantMin:  200 * time.Millisecond,
@@ -921,7 +923,7 @@ func TestRunTimeoutOption(t *testing.T) {
 			wantResp: false,
 		},
 		{
-			name:     "--timeout 0 waits as long as the server takes",
+			name:     "-timeout 0 waits as long as the server takes",
 			timeout:  "0",
 			delay:    300 * time.Millisecond,
 			wantCode: 0,
@@ -937,8 +939,8 @@ func TestRunTimeoutOption(t *testing.T) {
 			}, 4096)
 
 			var stdout, stderr bytes.Buffer
-			args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), "--tcp",
-				"--timeout", tt.timeout, "example.com"}
+			args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), "-tcp",
+				"-timeout", tt.timeout, "example.com"}
 
 			start := time.Now()
 			code := run(args, &stdout, &stderr)
@@ -952,10 +954,10 @@ func TestRunTimeoutOption(t *testing.T) {
 				t.Errorf("response present = %v, want %v\n%s", doc.Response != nil, tt.wantResp, stdout.String())
 			}
 			if tt.wantCode == 1 {
-				// The default timeout is shorter than --timeout, so reaching the
-				// --timeout deadline means the option replaced it.
+				// The default timeout is shorter than -timeout, so reaching the
+				// -timeout deadline means the option replaced it.
 				if elapsed < tt.wantMin {
-					t.Errorf("run() gave up after %v, before the %v --timeout", elapsed, tt.wantMin)
+					t.Errorf("run() gave up after %v, before the %v -timeout", elapsed, tt.wantMin)
 				}
 				if elapsed > tt.delay {
 					t.Errorf("run() returned after %v, want about %v", elapsed, tt.wantMin)
@@ -998,5 +1000,31 @@ func TestFirstNameserver(t *testing.T) {
 
 	if _, err := firstNameserver("tmp/does-not-exist/resolv.conf"); err == nil {
 		t.Error("firstNameserver() with a missing file returned no error")
+	}
+}
+
+// TestUsageOptions checks that the usage text names every option with a single
+// "-" and states the -timeout default that parseArgs actually uses.
+func TestUsageOptions(t *testing.T) {
+	if queryTimeout != dnsmsg.DefaultQueryTimeout {
+		t.Errorf("queryTimeout = %v, want the documented default %v", queryTimeout, dnsmsg.DefaultQueryTimeout)
+	}
+
+	for _, name := range []string{"tcp", "udp", "edns", "no-edns", "nsid", "timeout"} {
+		if !strings.Contains(usage, "  -"+name) {
+			t.Errorf("usage does not list -%s", name)
+		}
+		if strings.Contains(usage, "--"+name) {
+			t.Errorf("usage lists --%s, want -%s", name, name)
+		}
+	}
+
+	if strings.Contains(usage, "--") {
+		t.Errorf("usage contains a doubled \"-\": %s", usage)
+	}
+
+	wantDefault := "(既定: " + strconv.Itoa(int(queryTimeout.Seconds())) + ")"
+	if !strings.Contains(usage, wantDefault) {
+		t.Errorf("usage does not state the -timeout default %q", wantDefault)
 	}
 }

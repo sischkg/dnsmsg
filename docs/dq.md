@@ -24,13 +24,13 @@ usage: dq [options] <domain-name>
   -c <class>    QCLASS (既定: IN)
   -t <type>     QTYPE (既定: A)
   -r            RD=1 (再帰的問い合わせ) を設定する
-  --tcp         トランスポートに TCP を使う
-  --udp         トランスポートに UDP を使う (既定)
+  -tcp          トランスポートに TCP を使う
+  -udp          トランスポートに UDP を使う (既定)
   -o <format>   出力形式 (現在 json のみ)
-  --edns        EDNS0 を問い合わせに含める (既定)
-  --no-edns     EDNS0 を問い合わせに含めない
-  --nsid        問い合わせに長さ 0 の NSID オプションを含める
-  --timeout <n> 接続・送信・応答待ちの上限を秒で指定する (既定: 5)
+  -edns         EDNS0 を問い合わせに含める (既定)
+  -no-edns      EDNS0 を問い合わせに含めない
+  -nsid         問い合わせに長さ 0 の NSID オプションを含める
+  -timeout <n>  接続・送信・応答待ちの上限を秒で指定する (既定: 5)
                 0 は無制限
 ```
 
@@ -38,6 +38,8 @@ usage: dq [options] <domain-name>
   2 個以上のときは使い方を出て終了コード 2 になります）。
 - オプションはドメイン名の前後のどちらに置いても同じ意味になります。
   `dq example.com -r` は `dq -r example.com` と同じです。
+- オプション名は `-` 1 つで始めます（`-tcp`、`-timeout` など）。`--tcp` のように
+  `-` を 2 つ書いても同じオプションです。
 - `--` より後ろはすべて位置引数として扱われます。`-` で始まるドメイン名を
   渡すときに使います（`dq -- -example.com`）。
 - `-h` は使い方を表示して終了コード 0 で終わります。
@@ -51,18 +53,18 @@ usage: dq [options] <domain-name>
 | `-c <class>` | QCLASS | `IN` |
 | `-t <type>` | QTYPE | `A` |
 | `-r` | ヘッダの RD ビットを 1 にする（再帰的問い合わせ） | RD=0 |
-| `--tcp` | トランスポートに TCP を使う | — |
-| `--udp` | トランスポートに UDP を使う | 既定のトランスポート |
+| `-tcp` | トランスポートに TCP を使う | — |
+| `-udp` | トランスポートに UDP を使う | 既定のトランスポート |
 | `-o <format>` | 出力形式。現在 `json` のみ | `json` |
-| `--edns` | 問い合わせに OPT レコード（EDNS0）を含める | 含む |
-| `--no-edns` | 問い合わせに OPT レコードを含めない | — |
-| `--nsid` | 問い合わせの OPT に長さ 0 の NSID オプションを含める | 含めない |
-| `--timeout <n>` | 接続・送信・応答待ちの上限を秒で指定する。0 は無制限、小数も可（`--timeout 0.5`） | `5` 秒（`dnsmsg.DefaultQueryTimeout`） |
+| `-edns` | 問い合わせに OPT レコード（EDNS0）を含める | 含む |
+| `-no-edns` | 問い合わせに OPT レコードを含めない | — |
+| `-nsid` | 問い合わせの OPT に長さ 0 の NSID オプションを含める | 含めない |
+| `-timeout <n>` | 接続・送信・応答待ちの上限を秒で指定する。0 は無制限、小数も可（`-timeout 0.5`） | `5` 秒（`dnsmsg.DefaultQueryTimeout`） |
 
-`--tcp` と `--udp`、`--edns` と `--no-edns` を同時に指定するとエラーになります。
-`--nsid` は OPT を使わない `--no-edns` と同時に指定できません。
-`--edns=false` と書いても EDNS0 は使われません。
-`--timeout` に負の数を与えるとエラーになります。
+`-tcp` と `-udp`、`-edns` と `-no-edns` を同時に指定するとエラーになります。
+`-nsid` は OPT を使わない `-no-edns` と同時に指定できません。
+`-edns=false` と書いても EDNS0 は使われません。
+`-timeout` に負の数を与えるとエラーになります。
 
 ### 指定できる QCLASS・QTYPE
 
@@ -213,7 +215,7 @@ $ ./dq -r -s 172.16.253.81 example.com
 ### 例: NSID を要求する
 
 ```console
-$ ./dq -r --nsid example.com | jq '.query.AdditionalSection[0].RData.Options'
+$ ./dq -r -nsid example.com | jq '.query.AdditionalSection[0].RData.Options'
 [
   {
     "Code": 3,
@@ -229,7 +231,7 @@ $ ./dq -r --nsid example.com | jq '.query.AdditionalSection[0].RData.Options'
 ### 例: TCP で問い合わせる
 
 ```console
-$ ./dq --tcp -r example.com | jq '.response.ANCOUNT'
+$ ./dq -tcp -r example.com | jq '.response.ANCOUNT'
 2
 ```
 
@@ -239,7 +241,7 @@ TCP では RFC 1035 Section 4.2 の 2 オクテットの長さプレフィック
 ### 例: EDNS0 を使わない
 
 ```console
-$ ./dq --no-edns -r example.com | jq '{query_arcount: .query.ARCOUNT, response_arcount: .response.ARCOUNT}'
+$ ./dq -no-edns -r example.com | jq '{query_arcount: .query.ARCOUNT, response_arcount: .response.ARCOUNT}'
 {
   "query_arcount": 0,
   "response_arcount": 0
@@ -280,10 +282,10 @@ resolv.conf が読めない、または `nameserver` が無いときは `127.0.0
 
 ### タイムアウト
 
-`--timeout <n>` は接続・送信・応答待ちの上限を秒で指定します。
+`-timeout <n>` は接続・送信・応答待ちの上限を秒で指定します。
 既定は `dnsmsg.DefaultQueryTimeout`（5 秒）です。
 
-- 秒は小数でもよく（`--timeout 0.5`）、上限はありません。
+- 秒は小数でもよく（`-timeout 0.5`）、上限はありません。
 - `0` は無制限です。応答を返すまで待ち続けます。
 - 上限は接続（`net.DialTimeout`）と、その接続の送受信の両方に適用されます
   （`SendQueryWithTimeout` が `SetDeadline` で締切を設定します）。
@@ -293,13 +295,13 @@ resolv.conf が読めない、または `nameserver` が無いときは `127.0.0
 タイムアウトで失敗したときも送信したクエリは出力され、`"response": null` になります。
 
 ```console
-$ ./dq -s 192.0.2.1 --timeout 1 -r example.com
+$ ./dq -s 192.0.2.1 -timeout 1 -r example.com
 dq: cannot receive message from 192.0.2.1:53(read udp 172.17.0.2:50061->192.0.2.1:53: i/o timeout)
-$ ./dq --timeout -1 example.com
-dq: --timeout -1 は 0 秒以上で指定してください
+$ ./dq -timeout -1 example.com
+dq: -timeout -1 は 0 秒以上で指定してください
 ```
 
-`--timeout` を省略したときの待ち時間は `dnsmsg.DefaultQueryTimeout` そのものなので、
+`-timeout` を省略したときの待ち時間は `dnsmsg.DefaultQueryTimeout` そのものなので、
 応答を返さないサーバへの問い合わせは 5 秒で失敗します。
 
 ```console
@@ -313,13 +315,13 @@ dq: cannot receive message from 192.0.2.1:53(read udp 172.17.0.2:34972->192.0.2.
 ペイロードサイズは `dnsmsg.EDNS0DefaultPayloadSize`（1232）、FLAGS は 0 です。
 DNSSEC を要求する DO ビットを付けるオプションはありません。
 
-`--nsid` は OPT に NSID オプションを 1 つ追加します。
-OPT を付けない `--no-edns` とは同時に使えません。
+`-nsid` は OPT に NSID オプションを 1 つ追加します。
+OPT を付けない `-no-edns` とは同時に使えません。
 
 ### 切り詰められた応答
 
 応答の TC ビットが 1 でも、そのまま出力します。TCP で問い直すことはしません。
-必要なら `--tcp` を明示してください。
+必要なら `-tcp` を明示してください。
 
 ### 終了コード
 
@@ -334,10 +336,10 @@ OPT を付けない `--no-edns` とは同時に使えません。
 ```console
 $ ./dq -o yaml example.com
 dq: 出力形式 "yaml" には対応していません (json のみ)
-$ ./dq --tcp --udp example.com
-dq: --tcp と --udp は同時に指定できません
-$ ./dq --nsid --no-edns example.com
-dq: --nsid は --no-edns と同時に指定できません
+$ ./dq -tcp -udp example.com
+dq: -tcp と -udp は同時に指定できません
+$ ./dq -nsid -no-edns example.com
+dq: -nsid は -no-edns と同時に指定できません
 $ ./dq -p 0 example.com
 dq: ポート番号 0 が範囲外です
 ```

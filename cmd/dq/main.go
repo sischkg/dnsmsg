@@ -39,8 +39,8 @@ const (
 // read from.  It is a variable so that tests can point it at a scratch file.
 var resolvConfPath = "/etc/resolv.conf"
 
-// queryTimeout is how long a query waits for a reply when --timeout is not
-// given.  It is a variable so that tests can shorten it.
+// queryTimeout is the default value of -timeout: how long a query waits for a
+// reply.  It is a variable so that tests can shorten it.
 var queryTimeout = dnsmsg.DefaultQueryTimeout
 
 const usage = `usage: dq [options] <domain-name>
@@ -51,19 +51,19 @@ const usage = `usage: dq [options] <domain-name>
   -c <class>    QCLASS (既定: IN)
   -t <type>     QTYPE (既定: A)
   -r            RD=1 (再帰的問い合わせ) を設定する
-  --tcp         トランスポートに TCP を使う
-  --udp         トランスポートに UDP を使う (既定)
+  -tcp          トランスポートに TCP を使う
+  -udp          トランスポートに UDP を使う (既定)
   -o <format>   出力形式 (現在 json のみ)
-  --edns        EDNS0 を問い合わせに含める (既定)
-  --no-edns     EDNS0 を問い合わせに含めない
-  --nsid        問い合わせに長さ 0 の NSID オプションを含める
-  --timeout <n> 接続・送信・応答待ちの上限を秒で指定する (既定: 5)
+  -edns         EDNS0 を問い合わせに含める (既定)
+  -no-edns      EDNS0 を問い合わせに含めない
+  -nsid         問い合わせに長さ 0 の NSID オプションを含める
+  -timeout <n>  接続・送信・応答待ちの上限を秒で指定する (既定: 5)
                 0 は無制限
 `
 
 // options is the parsed command line.  transport is not an option of its own:
-// it is derived from --tcp and --udp.  timeout is the query timeout, which
-// comes from queryTimeout unless --timeout gives another value.
+// it is derived from -tcp and -udp.  timeout is the query timeout, which is
+// queryTimeout unless -timeout gives another value.
 type options struct {
 	server    string
 	port      uint16
@@ -134,7 +134,7 @@ func parseArgs(args []string, stderr io.Writer) (*options, error) {
 		edns    = fs.Bool("edns", true, "EDNS0 を使う")
 		noEDNS  = fs.Bool("no-edns", false, "EDNS0 を使わない")
 		nsid    = fs.Bool("nsid", false, "NSID オプションを含める")
-		timeout = fs.Float64("timeout", 0, "応答を待つ時間（秒）")
+		timeout = fs.Float64("timeout", queryTimeout.Seconds(), "応答を待つ時間（秒）")
 	)
 
 	if err := fs.Parse(reorderArgs(args)); err != nil {
@@ -142,7 +142,7 @@ func parseArgs(args []string, stderr io.Writer) (*options, error) {
 	}
 
 	// Only options the command line actually carries count as given, so that
-	// the defaults of --edns and --udp do not look like conflicts.
+	// the defaults of -edns and -udp do not look like conflicts.
 	given := make(map[string]bool)
 	fs.Visit(func(f *flag.Flag) { given[f.Name] = true })
 
@@ -151,13 +151,13 @@ func parseArgs(args []string, stderr io.Writer) (*options, error) {
 		return nil, errors.New("ドメイン名を 1 つ指定してください")
 	}
 	if given["tcp"] && given["udp"] {
-		return nil, errors.New("--tcp と --udp は同時に指定できません")
+		return nil, errors.New("-tcp と -udp は同時に指定できません")
 	}
 	if given["edns"] && given["no-edns"] {
-		return nil, errors.New("--edns と --no-edns は同時に指定できません")
+		return nil, errors.New("-edns と -no-edns は同時に指定できません")
 	}
 	if *nsid && *noEDNS {
-		return nil, errors.New("--nsid は --no-edns と同時に指定できません")
+		return nil, errors.New("-nsid は -no-edns と同時に指定できません")
 	}
 	if *port == 0 || *port > 65535 {
 		return nil, fmt.Errorf("ポート番号 %d が範囲外です", *port)
@@ -165,8 +165,8 @@ func parseArgs(args []string, stderr io.Writer) (*options, error) {
 	if *output != defaultOutput {
 		return nil, fmt.Errorf("出力形式 %q には対応していません (%s のみ)", *output, defaultOutput)
 	}
-	if given["timeout"] && *timeout < 0 {
-		return nil, fmt.Errorf("--timeout %v は 0 秒以上で指定してください", *timeout)
+	if *timeout < 0 {
+		return nil, fmt.Errorf("-timeout %v は 0 秒以上で指定してください", *timeout)
 	}
 
 	o := &options{
@@ -179,7 +179,10 @@ func parseArgs(args []string, stderr io.Writer) (*options, error) {
 		nsid:      *nsid,
 		name:      fs.Arg(0),
 		transport: dnsmsg.DNSoverUDP,
-		timeout:   queryTimeout,
+		// A zero timeout means "no timeout", which is what SendQueryWithTimeout
+		// does with a timeout that is not positive.  The addition rounds the
+		// number of nanoseconds to the nearest integer.
+		timeout: time.Duration(*timeout*float64(time.Second) + 0.5),
 	}
 	if *tcp {
 		o.transport = dnsmsg.DNSoverTCP
@@ -187,11 +190,6 @@ func parseArgs(args []string, stderr io.Writer) (*options, error) {
 		o.transport = dnsmsg.DNSoverUDP
 	}
 	o.port = uint16(*port)
-	if given["timeout"] {
-		// A zero timeout means "no timeout", which is what SendQueryWithTimeout
-		// does with a timeout that is not positive.
-		o.timeout = time.Duration(*timeout * float64(time.Second))
-	}
 	return o, nil
 }
 
