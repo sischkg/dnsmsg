@@ -288,11 +288,17 @@ func firstNameserver(path string) (string, error) {
 	return "", fmt.Errorf("no nameserver in %s", path)
 }
 
-// jsonDocument is the document of the json output format: the message dq sent
-// and the message it received.  Response is null when no response was received.
+// jsonDocument is the document of the json output format: the transport the two
+// messages travelled over, the message dq sent and the time it sent it, and the
+// message it received and the time it received it.  Response is null when no
+// response was received, Received is null when nothing was read, and Sent is
+// null when nothing was written.
 type jsonDocument struct {
-	Query    dnsmsg.Message  `json:"query"`
-	Response *dnsmsg.Message `json:"response"`
+	Transport string          `json:"transport"`
+	Query     dnsmsg.Message  `json:"query"`
+	Sent      *time.Time      `json:"sent"`
+	Response  *dnsmsg.Message `json:"response"`
+	Received  *time.Time      `json:"received"`
 }
 
 // exchange is one query and response exchange, in the form the output formats
@@ -338,12 +344,26 @@ type outputFormat interface {
 	write(w io.Writer, ex *exchange) error
 }
 
-// jsonFormat is the json output format: the two messages as the members of one
-// JSON document.
+// jsonFormat is the json output format: the transport, the two messages, and the
+// times they were sent and received, as the members of one JSON document.  The
+// times are RFC 3339 times with nanoseconds, the same times the base64 format
+// prints.
 type jsonFormat struct{}
 
 func (jsonFormat) write(w io.Writer, ex *exchange) error {
-	data, err := json.MarshalIndent(jsonDocument{Query: ex.query, Response: ex.reply}, "", "  ")
+	doc := jsonDocument{
+		Transport: ex.transport,
+		Query:     ex.query,
+		Response:  ex.reply,
+	}
+	if !ex.sentAt.IsZero() {
+		doc.Sent = &ex.sentAt
+	}
+	if !ex.recvAt.IsZero() {
+		doc.Received = &ex.recvAt
+	}
+
+	data, err := json.MarshalIndent(doc, "", "  ")
 	if err != nil {
 		return fmt.Errorf("cannot format the messages: %w", err)
 	}

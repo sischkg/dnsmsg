@@ -752,6 +752,7 @@ func TestRunJSON(t *testing.T) {
 
 			var stdout, stderr bytes.Buffer
 			args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), transport, "-r", "-nsid", "example.com"}
+			start := time.Now()
 			if code := run(args, &stdout, &stderr); code != 0 {
 				t.Fatalf("run(%v) exit code = %d, want 0\nstderr: %s", args, code, stderr.String())
 			}
@@ -768,6 +769,44 @@ func TestRunJSON(t *testing.T) {
 			}
 
 			doc := decodeOutput(t, out)
+
+			// The transport comes first, and each time follows the message it
+			// belongs to.
+			wantTransport := strings.TrimPrefix(transport, "-")
+			members := []string{`"transport"`, `"query"`, `"sent"`, `"response"`, `"received"`}
+			prev := ""
+			prevAt := -1
+			for _, member := range members {
+				at := bytes.Index(out, []byte("\n  "+member+":"))
+				if at < 0 {
+					t.Fatalf("the JSON output has no %s member:\n%s", member, out)
+				}
+				if at < prevAt {
+					t.Errorf("the JSON output has %s before %s, want the members in the order %v",
+						member, prev, members)
+				}
+				prev, prevAt = member, at
+			}
+
+			if doc.Transport != wantTransport {
+				t.Errorf("transport = %q, want %q", doc.Transport, wantTransport)
+			}
+			if doc.Sent == nil {
+				t.Fatal("sent is null, want the time the query was sent")
+			}
+			if doc.Received == nil {
+				t.Fatal("received is null, want the time the response was received")
+			}
+			for _, at := range []*time.Time{doc.Sent, doc.Received} {
+				if at.Before(start.Add(-time.Second)) || at.After(time.Now().Add(time.Second)) {
+					t.Errorf("the document reports %s, which is outside the time window of this run",
+						at.Format(time.RFC3339Nano))
+				}
+			}
+			if doc.Received.Before(*doc.Sent) {
+				t.Errorf("received is %s, before sent at %s",
+					doc.Received.Format(time.RFC3339Nano), doc.Sent.Format(time.RFC3339Nano))
+			}
 
 			q := doc.Query
 			if q.QR != dnsmsg.QRQuery || q.RD != 1 || q.QDCOUNT != 1 {
@@ -1085,6 +1124,15 @@ func TestRunQueryFailure(t *testing.T) {
 	if doc.Response != nil {
 		t.Errorf("response = %v, want null", doc.Response)
 	}
+	if doc.Transport != "tcp" {
+		t.Errorf("transport = %q, want %q", doc.Transport, "tcp")
+	}
+	if doc.Sent != nil {
+		t.Errorf("sent = %s, want null: nothing was written to the socket", doc.Sent.Format(time.RFC3339Nano))
+	}
+	if doc.Received != nil {
+		t.Errorf("received = %s, want null: nothing was read from the socket", doc.Received.Format(time.RFC3339Nano))
+	}
 	if !bytes.Contains(stdout.Bytes(), []byte(`"response": null`)) {
 		t.Errorf("the JSON output does not carry a null response:\n%s", stdout.String())
 	}
@@ -1143,6 +1191,12 @@ func TestRunNoAnswer(t *testing.T) {
 	doc := decodeOutput(t, stdout.Bytes())
 	if doc.Response != nil {
 		t.Errorf("response = %v, want null", doc.Response)
+	}
+	if doc.Sent == nil {
+		t.Error("sent is null, want the time the query was sent")
+	}
+	if doc.Received != nil {
+		t.Errorf("received = %s, want null: the answer never arrived", doc.Received.Format(time.RFC3339Nano))
 	}
 }
 

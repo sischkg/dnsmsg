@@ -2,7 +2,8 @@
 
 `cmd/dq` は `dnsmsg` パッケージの上で動くコマンドラインツールです。
 コマンドラインから DNS クエリを組み立てて指定したサーバへ送信し、
-**送信したクエリメッセージ**と**受信した応答メッセージ**を JSON または base64 で出力します。
+**送信したクエリメッセージ**と**受信した応答メッセージ**を、送受信の時刻と
+トランスポートを添えて JSON または base64 で出力します。
 
 出力は実際に送受信したメッセージそのものです。応答が切り詰められていても
 （TC=1）別のトランスポートで問い直すことはしません。
@@ -89,17 +90,32 @@ dq: QCLASS "XX" が分かりません
 ### json（既定）
 
 `-o json` では 2 スペースでインデントした 1 つの JSON オブジェクトを
-stdout に出します。中身は `dnsmsg.Message` の JSON 表現（`MarshalJSON`）そのままで、
-`Message` の JSON の鍵（`ID` / `QR` / `OPCODE` / `QuestionSection` …）がそのまま使われます。
+stdout に出します。`query` と `response` の中身は `dnsmsg.Message` の JSON 表現
+（`MarshalJSON`）そのままで、`Message` の JSON の鍵（`ID` / `QR` / `OPCODE` /
+`QuestionSection` …）がそのまま使われます。
 
 ```json
 {
+  "transport": "udp",
   "query":    { … 送信したクエリメッセージ … },
-  "response": { … 受信した応答メッセージ … }
+  "sent":     "<送信した時刻>",
+  "response": { … 受信した応答メッセージ … },
+  "received": "<受信した時刻>"
 }
 ```
 
+- この JSON の鍵は上の順序のままです（`transport` が先頭で、各時刻は対応する
+  メッセージの直後に出します）。`query` と `response` の中の鍵の順序は
+  `Message.MarshalJSON` のもので、この JSON の順序ではありません。
+- `transport` は実際に使ったトランスポートで、`tcp` または `udp` です。
+- `sent`・`received` は `time.RFC3339Nano` 形式の UTC の時刻で、base64 形式が
+  出す時刻と同じ値です。送信時刻はメッセージを socket に書き出した後、受信時刻は
+  応答のオクテット列を読み出した後に取った値です。
+- 書き出していないときは `"sent": null`、何も読み出していないときは
+  `"received": null` になります。
 - 応答を受信できなかったときは `"response": null` になります（この場合終了コード 1）。
+  応答を読み出したのに解析できなかったときは `"response": null` のまま
+  `"received"` には時刻が入ります。
 - ドメイン名は末尾のドット付きで表示されます（`"example.com."`、root は `"."`）。
 - OPT レコードは in-memory の形で表示されます。つまり `"Class": "IN"`、
   `"TTL"` は拡張 UDP ペイロードサイズ、`RData` は `Version` / `Flags` / `Options` です。
@@ -112,6 +128,7 @@ stdout に出します。中身は `dnsmsg.Message` の JSON 表現（`MarshalJS
 ```console
 $ ./dq -r -s 172.16.253.81 example.com
 {
+  "transport": "udp",
   "query": {
     "AA": 0,
     "AD": 0,
@@ -133,7 +150,7 @@ $ ./dq -r -s 172.16.253.81 example.com
     "AnswerSection": null,
     "AuthoritySection": null,
     "CD": 0,
-    "ID": 125,
+    "ID": 23357,
     "NSCOUNT": 0,
     "OPCODE": 0,
     "QDCOUNT": 1,
@@ -151,6 +168,7 @@ $ ./dq -r -s 172.16.253.81 example.com
     "TC": 0,
     "Z": 0
   },
+  "sent": "2026-10-19T12:23:23.951037015Z",
   "response": {
     "AA": 0,
     "AD": 0,
@@ -174,24 +192,24 @@ $ ./dq -r -s 172.16.253.81 example.com
         "Class": "IN",
         "Name": "example.com.",
         "RData": {
-          "address": "172.66.147.243"
+          "address": "104.20.23.154"
         },
-        "TTL": 171,
+        "TTL": 180,
         "Type": "A"
       },
       {
         "Class": "IN",
         "Name": "example.com.",
         "RData": {
-          "address": "104.20.23.154"
+          "address": "172.66.147.243"
         },
-        "TTL": 171,
+        "TTL": 180,
         "Type": "A"
       }
     ],
     "AuthoritySection": null,
     "CD": 0,
-    "ID": 125,
+    "ID": 23357,
     "NSCOUNT": 0,
     "OPCODE": 0,
     "QDCOUNT": 1,
@@ -208,7 +226,8 @@ $ ./dq -r -s 172.16.253.81 example.com
     "RD": 1,
     "TC": 0,
     "Z": 0
-  }
+  },
+  "received": "2026-10-19T12:23:23.955522153Z"
 }
 ```
 
@@ -255,16 +274,34 @@ $ ./dq -no-edns -r example.com | jq '{query_arcount: .query.ARCOUNT, response_ar
 #### 例: 応答を受信できなかったとき
 
 送信に失敗しても、受信できなかったときにも送信しようとしたクエリは出力されます。
+応答を読み出せなかったときは `received` が `null` になります。
 
 ```console
 $ ./dq -s 127.0.0.1 -p 9 -r example.com
-dq: cannot receive message from 127.0.0.1:9(read udp 127.0.0.1:60178->127.0.0.1:9: read: connection refused)
+dq: cannot receive message from 127.0.0.1:9(read udp 127.0.0.1:34839->127.0.0.1:9: read: connection refused)
 {
+  "transport": "udp",
   "query": { … 送信したクエリ … },
-  "response": null
+  "sent": "2026-10-19T12:23:34.846142918Z",
+  "response": null,
+  "received": null
 }
 $ echo $?
 1
+```
+
+socket に何も書いていないときは `sent` も `null` になります。
+
+```console
+$ ./dq -tcp -s 127.0.0.1 -p 9 -r example.com
+dq: cannot send message to 127.0.0.1:9(dial tcp 127.0.0.1:9: connect: connection refused)
+{
+  "transport": "tcp",
+  "query": { … 送信しようとしたクエリ … },
+  "sent": null,
+  "response": null,
+  "received": null
+}
 ```
 
 ### base64
@@ -415,7 +452,7 @@ dq: ポート番号 0 が範囲外です
 | クエリの構築 | `Message.SetQuery`（Question セクション）、`Message.SetEDNS0`（OPT と EDNS option） |
 | メッセージ ID | `crypto/rand` による 16 bit の乱数 |
 | 送信・受信 | `dnsmsg.Exchange`（送受信したオクテット列と時刻を `QueryExchange` で返す。`SendQuery` / `SendQueryWithTimeout` はこれを呼ぶ。[index.md](index.md) 参照） |
-| json 出力 | `Message.MarshalJSON` を `json.MarshalIndent` 経由で出力 |
+| json 出力 | `jsonDocument`（`transport` / `query` / `sent` / `response` / `received`）を `json.MarshalIndent` 経由で出力。`query`・`response` は `Message.MarshalJSON`、`sent`・`received` は `QueryExchange` の `SentAt` / `ReceivedAt` を `time.RFC3339Nano` 形式で |
 | base64 出力 | `QueryExchange` の `QueryWire` / `ReplyWire` を `base64.StdEncoding` で、`SentAt` / `ReceivedAt` を `time.RFC3339Nano` で出力 |
 
 出力形式は `outputFormat` インターフェース（`write(w io.Writer, ex *exchange) error`）で
