@@ -103,6 +103,9 @@ func parseKeyData(data []byte, filename string) (*DNSSECKey, error) {
 // parseKeyLine parses a single DNSKEY record line from a .key file.
 //
 // Format: <name> IN DNSKEY <flags> <protocol> <algorithm> <base64-public-key>
+//
+// The base64 public key may be split into space separated chunks, which is what
+// dnssec-keygen does for keys whose material is longer than one line.
 func parseKeyLine(line string) (*DNSSECKey, error) {
 	fields := strings.Fields(line)
 	if len(fields) < 7 {
@@ -135,9 +138,12 @@ func parseKeyLine(line string) (*DNSSECKey, error) {
 		return nil, err
 	}
 
-	publicKey, err := decodeBase64(fields[6])
+	// dnssec-keygen wraps long public keys into space separated chunks, so the
+	// public key material is every field that follows the algorithm.
+	encodedPublicKey := strings.Join(fields[6:], "")
+	publicKey, err := decodeBase64(encodedPublicKey)
 	if err != nil {
-		return nil, fmt.Errorf("invalid DNSKEY public key %q: %w", fields[6], err)
+		return nil, fmt.Errorf("invalid DNSKEY public key %q: %w", encodedPublicKey, err)
 	}
 
 	return &DNSSECKey{
