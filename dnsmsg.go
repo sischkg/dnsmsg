@@ -861,13 +861,48 @@ func SendQuery(query Message, target string, port uint16, transport string) (Mes
 // prefix of RFC 1035 section 4.2.  The reply is read with io.ReadFull, so a
 // reply that arrives split over several segments is read completely.
 func SendQueryWithTimeout(query Message, target string, port uint16, transport string, timeout time.Duration) (reply Message, err error) {
-	var q, r WireFormat
-	q.WriteWireFormat(query)
+	ex, err := Exchange(query, target, port, transport, timeout)
+	reply = ex.Reply
+	return
+}
 
+// QueryExchange is what one exchange of a query and a response put on the wire:
+// the messages, the exact octets that were written and read, and the times at
+// which they were sent and received.
+//
+// QueryWire and ReplyWire are the DNS messages themselves, without the
+// two-octet length prefix that RFC 1035 section 4.2 adds over TCP.  SentAt is
+// the zero time when nothing was written, and Reply and ReplyWire are the empty
+// message and nil when no response was read.  The query side is reported even
+// when Exchange reports an error, so that a failed exchange can still be shown.
+type QueryExchange struct {
+	Transport  string
+	Query      Message
+	QueryWire  WireFormat
+	SentAt     time.Time
+	Reply      Message
+	ReplyWire  WireFormat
+	ReceivedAt time.Time
+}
+
+// Exchange sends query to target:port over transport (DNSoverUDP or
+// DNSoverTCP), reads the reply, and reports the whole exchange as a
+// QueryExchange.  It is the implementation behind SendQueryWithTimeout, and it
+// exists on its own for the programs that need the wire format of the messages
+// or the times they were sent and received, such as an output format that
+// prints the messages as they went on the wire.
+//
+// timeout limits the connect, write and read steps; a timeout of zero or less
+// means no timeout.
+func Exchange(query Message, target string, port uint16, transport string, timeout time.Duration) (ex QueryExchange, err error) {
+	ex.Transport = transport
 	if transport != DNSoverUDP && transport != DNSoverTCP {
 		err = fmt.Errorf("unknown transport %s", transport)
 		return
 	}
+
+	ex.Query = query
+	ex.QueryWire.WriteWireFormat(query)
 
 	endpoint := net.JoinHostPort(target, strconv.Itoa(int(port)))
 	conn, e := net.DialTimeout(transport, endpoint, timeout)
@@ -884,6 +919,8 @@ func SendQueryWithTimeout(query Message, target string, port uint16, transport s
 		}
 	}
 
+	q := ex.QueryWire
+	ex.SentAt = time.Now()
 	if transport == DNSoverUDP {
 		if _, e = conn.Write([]byte(q)); e != nil {
 			err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
@@ -895,7 +932,7 @@ func SendQueryWithTimeout(query Message, target string, port uint16, transport s
 			err = fmt.Errorf("cannot receive message from %s:%d(%s)", target, port, e)
 			return
 		}
-		r = WireFormat(buf[:n])
+		ex.ReplyWire = WireFormat(buf[:n])
 	} else {
 		sendSize := binary.BigEndian.AppendUint16(nil, uint16(q.Size()))
 		if _, e = conn.Write(sendSize); e != nil {
@@ -917,9 +954,10 @@ func SendQueryWithTimeout(query Message, target string, port uint16, transport s
 			err = fmt.Errorf("cannot receive message from %s:%d(%s)", target, port, e)
 			return
 		}
-		r = WireFormat(buf)
+		ex.ReplyWire = WireFormat(buf)
 	}
 
-	reply, err = ParseWireFormat(r)
+	ex.ReceivedAt = time.Now()
+	ex.Reply, err = ParseWireFormat(ex.ReplyWire)
 	return
 }

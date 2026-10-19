@@ -6,10 +6,15 @@
 // single positional argument, and -c and -t select the QCLASS and QTYPE.  The
 // messages are printed exactly as they were sent and received; dq does not
 // retry a truncated (TC=1) answer over another transport.
+//
+// The output formats are the values of the outputFormat interface registered in
+// outputFormats: json prints the parsed messages, base64 prints the octets they
+// had on the wire.
 package main
 
 import (
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -17,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -53,7 +59,7 @@ const usage = `usage: dq [options] <domain-name>
   -r            RD=1 (再帰的問い合わせ) を設定する
   -tcp          トランスポートに TCP を使う
   -udp          トランスポートに UDP を使う (既定)
-  -o <format>   出力形式 (現在 json のみ)
+  -o <format>   出力形式: json または base64 (既定: json)
   -edns         EDNS0 を問い合わせに含める (既定)
   -no-edns      EDNS0 を問い合わせに含めない
   -nsid         問い合わせに長さ 0 の NSID オプションを含める
@@ -162,8 +168,8 @@ func parseArgs(args []string, stderr io.Writer) (*options, error) {
 	if *port == 0 || *port > 65535 {
 		return nil, fmt.Errorf("ポート番号 %d が範囲外です", *port)
 	}
-	if *output != defaultOutput {
-		return nil, fmt.Errorf("出力形式 %q には対応していません (%s のみ)", *output, defaultOutput)
+	if _, ok := outputFormats[*output]; !ok {
+		return nil, fmt.Errorf("出力形式 %q には対応していません (%s のみ)", *output, strings.Join(formatNames(), ", "))
 	}
 	if *timeout < 0 {
 		return nil, fmt.Errorf("-timeout %v は 0 秒以上で指定してください", *timeout)
@@ -282,17 +288,62 @@ func firstNameserver(path string) (string, error) {
 	return "", fmt.Errorf("no nameserver in %s", path)
 }
 
-// outputMessage is what dq prints: the message it sent and the message it
-// received.  Response is null when no response was received.
-type outputMessage struct {
+// jsonDocument is the document of the json output format: the message dq sent
+// and the message it received.  Response is null when no response was received.
+type jsonDocument struct {
 	Query    dnsmsg.Message  `json:"query"`
 	Response *dnsmsg.Message `json:"response"`
 }
 
-// emitJSON writes query and reply as the JSON document of the json output
-// format.  reply is nil when no response was received.
-func emitJSON(w io.Writer, query dnsmsg.Message, reply *dnsmsg.Message) error {
-	data, err := json.MarshalIndent(outputMessage{Query: query, Response: reply}, "", "  ")
+// exchange is one query and response exchange, in the form the output formats
+// read it.  It is the dnsmsg.QueryExchange of a finished exchange, with the
+// response replaced by a pointer so that "no response" has a value of its own.
+//
+// sentAt is the zero time when nothing was written, and recvAt is the zero time
+// when nothing was read.  reply is nil unless a response was parsed, which is
+// not the same as recvAt being the zero time: a response that was read but
+// could not be parsed is still on the wire, and a format that prints the wire
+// can still print it.
+type exchange struct {
+	transport string
+	query     dnsmsg.Message
+	queryWire dnsmsg.WireFormat
+	sentAt    time.Time
+	reply     *dnsmsg.Message
+	replyWire dnsmsg.WireFormat
+	recvAt    time.Time
+}
+
+// newExchange reports the exchange ex as the output formats need it.  err is
+// the error Exchange reported for ex, if any.
+func newExchange(ex dnsmsg.QueryExchange, err error) *exchange {
+	e := &exchange{
+		transport: ex.Transport,
+		query:     ex.Query,
+		queryWire: ex.QueryWire,
+		sentAt:    ex.SentAt,
+		replyWire: ex.ReplyWire,
+		recvAt:    ex.ReceivedAt,
+	}
+	if err == nil {
+		e.reply = &ex.Reply
+	}
+	return e
+}
+
+// outputFormat writes one query and response exchange to w in one of the output
+// formats of dq.  A format that has no response to show leaves the response out
+// of its output; a format that has nothing at all to show writes nothing.
+type outputFormat interface {
+	write(w io.Writer, ex *exchange) error
+}
+
+// jsonFormat is the json output format: the two messages as the members of one
+// JSON document.
+type jsonFormat struct{}
+
+func (jsonFormat) write(w io.Writer, ex *exchange) error {
+	data, err := json.MarshalIndent(jsonDocument{Query: ex.query, Response: ex.reply}, "", "  ")
 	if err != nil {
 		return fmt.Errorf("cannot format the messages: %w", err)
 	}
@@ -300,6 +351,51 @@ func emitJSON(w io.Writer, query dnsmsg.Message, reply *dnsmsg.Message) error {
 		return fmt.Errorf("cannot write the messages: %w", err)
 	}
 	return nil
+}
+
+// base64Format is the base64 output format: one line per message, as
+//
+//	sent,<送信時刻>,<トランスポート>,<DNS メッセージの BASE64>
+//	recv,<受信時刻>,<トランスポート>,<DNS メッセージの BASE64>
+//
+// The times are RFC 3339 times with nanoseconds, the transport is tcp or udp,
+// and the message is the base64 of the octets that went on the wire, without
+// the two-octet length prefix that TCP adds.  The recv line is left out when no
+// response was read.
+type base64Format struct{}
+
+func (base64Format) write(w io.Writer, ex *exchange) error {
+	var text strings.Builder
+	if !ex.sentAt.IsZero() {
+		fmt.Fprintf(&text, "sent,%s,%s,%s\n", ex.sentAt.Format(time.RFC3339Nano), ex.transport,
+			base64.StdEncoding.EncodeToString(ex.queryWire))
+	}
+	if !ex.recvAt.IsZero() {
+		fmt.Fprintf(&text, "recv,%s,%s,%s\n", ex.recvAt.Format(time.RFC3339Nano), ex.transport,
+			base64.StdEncoding.EncodeToString(ex.replyWire))
+	}
+	if _, err := io.WriteString(w, text.String()); err != nil {
+		return fmt.Errorf("cannot write the messages: %w", err)
+	}
+	return nil
+}
+
+// outputFormats are the output formats dq accepts, keyed by the name given to
+// -o.  Add an entry here to add an output format.
+var outputFormats = map[string]outputFormat{
+	"json":   jsonFormat{},
+	"base64": base64Format{},
+}
+
+// formatNames returns the names of the output formats, in order, for use in a
+// message about an unknown one.
+func formatNames() []string {
+	names := make([]string, 0, len(outputFormats))
+	for name := range outputFormats {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names
 }
 
 // run is the dq command with its streams replaced, so that tests can capture
@@ -336,17 +432,17 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 
-	reply, err := dnsmsg.SendQueryWithTimeout(query, o.server, o.port, o.transport, o.timeout)
+	ex, err := dnsmsg.Exchange(query, o.server, o.port, o.transport, o.timeout)
 	if err != nil {
 		fmt.Fprintf(stderr, "dq: %v\n", err)
-		if e := emitJSON(stdout, query, nil); e != nil {
-			fmt.Fprintf(stderr, "dq: %v\n", e)
-		}
+	}
+	// The messages are printed even when the exchange failed, because the query
+	// side of a failed exchange is still the message dq sent.
+	if werr := outputFormats[o.output].write(stdout, newExchange(ex, err)); werr != nil {
+		fmt.Fprintf(stderr, "dq: %v\n", werr)
 		return 1
 	}
-
-	if err := emitJSON(stdout, query, &reply); err != nil {
-		fmt.Fprintf(stderr, "dq: %v\n", err)
+	if err != nil {
 		return 1
 	}
 	return 0

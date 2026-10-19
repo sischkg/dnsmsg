@@ -33,9 +33,9 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
   - `Zone` 構造体（オリジン、デフォルト TTL、RRSet コレクション）
   - `AddRRSet` / `FindRRSet` / `RemoveRRSet` / `Equal` / `CanonicalWireFormat`
   - `ResourceRecordsToZone` で `[]ResourceRecord` を RRSet にグループ化して Zone を構築
-- UDP / TCP による DNS クエリ送信（`SendQuery` / `SendQueryWithTimeout`）
+- UDP / TCP による DNS クエリ送信（`SendQuery` / `SendQueryWithTimeout` / `Exchange`）
 - `dq` コマンド（`cmd/dq`）: 指定したサーバへ問い合わせを送り、送信したメッセージと
-  受信したメッセージを JSON で表示（`docs/dq.md`）
+  受信したメッセージを JSON または base64 で表示（`docs/dq.md`）
 
 ## サポートするレコードタイプ
 
@@ -70,7 +70,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
 | [record-nsec3param.md](record-nsec3param.md) | NSEC3PARAM レコード（RFC 5155） |
 | [tsig.md](tsig.md) | TSIG による DNS メッセージの署名と検証（RFC 8945） |
-| [dq.md](dq.md) | `dq` コマンド（`cmd/dq`）: 問い合わせ送信と送信・受信メッセージの JSON 表示 |
+| [dq.md](dq.md) | `dq` コマンド（`cmd/dq`）: 問い合わせ送信と送信・受信メッセージの JSON / base64 表示 |
 
 ## クイックスタート
 
@@ -118,6 +118,31 @@ func main() {
 	}
 }
 ```
+
+### 送受信したオクテット列と時刻を受け取る
+
+`Exchange` は `SendQueryWithTimeout` の実体です。応答をパースして返すだけでなく、
+実際に送受信したオクテット列と、それらを書き出し・読み出した時刻を
+`QueryExchange` で返します。wire を通ったバイト列そのものが必要な場合
+（base64 での出力、ログへの記録など）では `SendQueryWithTimeout` の代わりに
+`Exchange` を使います。
+
+```go
+ex, err := dnsmsg.Exchange(query, "8.8.8.8", 53, dnsmsg.DNSoverTCP, 2*time.Second)
+if err != nil {
+	// 送信に失敗した場合にも、送信しようとしたメッセージは ex.Query と
+	// ex.QueryWire に入っています。
+	log.Println(err)
+}
+fmt.Printf("sent   %s  %d octets\n", ex.SentAt.Format(time.RFC3339Nano), ex.QueryWire.Size())
+fmt.Printf("received %s  %d octets\n", ex.ReceivedAt.Format(time.RFC3339Nano), ex.ReplyWire.Size())
+```
+
+- `QueryWire` と `ReplyWire` は DNS メッセージそのもので、TCP のときに前置される
+  2 オクテットのメッセージ長ヘッダは含みません。
+- socket に何も書き出さなかったときは `SentAt` がゼロ時刻、応答を読み出さなかった
+  ときは `ReplyWire` は nil で `Reply` は空のメッセージです。
+- 受信したオクテット列のパースに失敗したときは `ReplyWire` だけが入ります。
 
 ### wire format でのシリアライズ / パース
 
@@ -169,9 +194,10 @@ for _, rr := range resp.AnswerSection {
 | `NameCompressionDB` | 名前圧縮ポインタ管理 DB。シリアライズ時に `AppendDomainName` と連携する |
 | `RecordOPT` | EDNS(0) の OPT レコード。`Version` / `Flags` / `Options` |
 | `EDNSOption` | EDNS option のインターフェース。DO / NSID / EDE / `EDNSOptionRaw` が実装する |
+| `QueryExchange` | 1 回の問い合わせの送受信。`Transport` / `Query` / `QueryWire` / `SentAt` / `Reply` / `ReplyWire` / `ReceivedAt`（`Exchange` が返す） |
 
 ## 関連リンク
 
 - [edns.md](edns.md) — EDNS(0) / OPT レコードと EDNS option の作成
 - [tsig.md](tsig.md) — TSIG による DNS メッセージの署名と検証（RFC 8945）
-- [dq.md](dq.md) — `dq` コマンドの使い方（問い合わせ送信、JSON 出力）
+- [dq.md](dq.md) — `dq` コマンドの使い方（問い合わせ送信、JSON / base64 出力）

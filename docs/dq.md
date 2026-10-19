@@ -2,7 +2,7 @@
 
 `cmd/dq` は `dnsmsg` パッケージの上で動くコマンドラインツールです。
 コマンドラインから DNS クエリを組み立てて指定したサーバへ送信し、
-**送信したクエリメッセージ**と**受信した応答メッセージ**を JSON で出力します。
+**送信したクエリメッセージ**と**受信した応答メッセージ**を JSON または base64 で出力します。
 
 出力は実際に送受信したメッセージそのものです。応答が切り詰められていても
 （TC=1）別のトランスポートで問い直すことはしません。
@@ -26,7 +26,7 @@ usage: dq [options] <domain-name>
   -r            RD=1 (再帰的問い合わせ) を設定する
   -tcp          トランスポートに TCP を使う
   -udp          トランスポートに UDP を使う (既定)
-  -o <format>   出力形式 (現在 json のみ)
+  -o <format>   出力形式: json または base64 (既定: json)
   -edns         EDNS0 を問い合わせに含める (既定)
   -no-edns      EDNS0 を問い合わせに含めない
   -nsid         問い合わせに長さ 0 の NSID オプションを含める
@@ -55,7 +55,7 @@ usage: dq [options] <domain-name>
 | `-r` | ヘッダの RD ビットを 1 にする（再帰的問い合わせ） | RD=0 |
 | `-tcp` | トランスポートに TCP を使う | — |
 | `-udp` | トランスポートに UDP を使う | 既定のトランスポート |
-| `-o <format>` | 出力形式。現在 `json` のみ | `json` |
+| `-o <format>` | 出力形式。`json` または `base64` | `json` |
 | `-edns` | 問い合わせに OPT レコード（EDNS0）を含める | 含む |
 | `-no-edns` | 問い合わせに OPT レコードを含めない | — |
 | `-nsid` | 問い合わせの OPT に長さ 0 の NSID オプションを含める | 含めない |
@@ -84,7 +84,11 @@ dq: QCLASS "XX" が分かりません
 
 ## 出力形式
 
-`-o json`（既定）では 2 スペースでインデントした 1 つの JSON オブジェクトを
+`-o` で出力形式を選びます。`json`（既定）と `base64` が使えます。
+
+### json（既定）
+
+`-o json` では 2 スペースでインデントした 1 つの JSON オブジェクトを
 stdout に出します。中身は `dnsmsg.Message` の JSON 表現（`MarshalJSON`）そのままで、
 `Message` の JSON の鍵（`ID` / `QR` / `OPCODE` / `QuestionSection` …）がそのまま使われます。
 
@@ -103,7 +107,7 @@ stdout に出します。中身は `dnsmsg.Message` の JSON 表現（`MarshalJS
 - 問い合わせ先サーバを決めたこと、エラーの内容は stderr に出ます。
   stdout は JSON だけなので `jq` などにそのままパイプできます。
 
-### 例: 基本的な問い合わせ
+#### 例: 基本的な問い合わせ
 
 ```console
 $ ./dq -r -s 172.16.253.81 example.com
@@ -212,7 +216,7 @@ $ ./dq -r -s 172.16.253.81 example.com
 並びます（ヘッダのビット順ではありません）。`ID` は問い合わせごとに乱数で決まるので
 実際の値は毎回違います。TTL やアドレスなどの応答の内容はサーバによります。
 
-### 例: NSID を要求する
+#### 例: NSID を要求する
 
 ```console
 $ ./dq -r -nsid example.com | jq '.query.AdditionalSection[0].RData.Options'
@@ -228,7 +232,7 @@ $ ./dq -r -nsid example.com | jq '.query.AdditionalSection[0].RData.Options'
 「応答にあなたの NSID を載せてください」という要求）。サーバが NSID を返さないと
 応答側の `Options` は `null` になります。
 
-### 例: TCP で問い合わせる
+#### 例: TCP で問い合わせる
 
 ```console
 $ ./dq -tcp -r example.com | jq '.response.ANCOUNT'
@@ -238,7 +242,7 @@ $ ./dq -tcp -r example.com | jq '.response.ANCOUNT'
 TCP では RFC 1035 Section 4.2 の 2 オクテットの長さプレフィックスでフレーミングされ、
 応答は複数セグメントに分かれて届いても最後まで読まれます。
 
-### 例: EDNS0 を使わない
+#### 例: EDNS0 を使わない
 
 ```console
 $ ./dq -no-edns -r example.com | jq '{query_arcount: .query.ARCOUNT, response_arcount: .response.ARCOUNT}'
@@ -248,7 +252,7 @@ $ ./dq -no-edns -r example.com | jq '{query_arcount: .query.ARCOUNT, response_ar
 }
 ```
 
-### 例: 応答を受信できなかったとき
+#### 例: 応答を受信できなかったとき
 
 送信に失敗しても、受信できなかったときにも送信しようとしたクエリは出力されます。
 
@@ -259,6 +263,63 @@ dq: cannot receive message from 127.0.0.1:9(read udp 127.0.0.1:60178->127.0.0.1:
   "query": { … 送信したクエリ … },
   "response": null
 }
+$ echo $?
+1
+```
+
+### base64
+
+`-o base64` では、送受信したメッセージのオクテット列を base64 で 1 行ずつ出します。
+JSON のように構造化せず、実際に wire を通ったバイト列そのものを残す形式です。
+
+```
+sent,<送信時刻>,<transport>,<DNS メッセージの base64>
+recv,<受信時刻>,<transport>,<DNS メッセージの base64>
+```
+
+- 1 行目は送信したメッセージ、2 行目は受信したメッセージです。
+- `<送信時刻>`・`<受信時刻>` は `time.RFC3339Nano` 形式（`2006-01-02T15:04:05.999999999Z07:00`）
+  の UTC の時刻です。送信時刻はメッセージを socket に書き出した後、受信時刻は応答の
+  オクテット列を読み出した後に取った値です。
+- `<transport>` は `tcp` または `udp` です。
+- base64 は標準字母表（`base64.StdEncoding`）で、行の折り返しはありません。
+- 復号したものは DNS メッセージそのものです。TCP のときに前置される 2 オクテットの
+  メッセージ長ヘッダは含みません。
+- 応答を受信できなかったときは `sent,` の行だけを出します（JSON の `"response": null` に
+  対応します）。この場合の終了コードは 1 です。
+- 送信そのものに失敗したとき（TCP の接続が拒否されたなど）は stdout には何も出しません。
+  socket に何も書いていないためです。エラーは stderr に出ます。
+
+#### 例: base64 で受け取る
+
+```console
+$ ./dq -r -s 172.16.253.81 -o base64 example.com
+sent,2026-10-19T11:24:28.444907309Z,udp,HDIBAAABAAAAAAABB2V4YW1wbGUDY29tAAABAAEAACkE0AAAAAAAAA==
+recv,2026-10-19T11:24:28.45815058Z,udp,HDKBgAABAAIAAAABB2V4YW1wbGUDY29tAAABAAHADAABAAEAAAEsAASsQpPzwAwAAQABAAABLAAEaBQXmgAAKQTQAAAAAAAA
+```
+
+4 番目のフィールドを復号すると、実際に送受信したメッセージのオクテット列になります。
+先頭の 2 オクテットはメッセージ ID なので実行するたびに変わります。
+
+```console
+$ ./dq -r -s 172.16.253.81 -o base64 example.com 2>/dev/null | tail -1 | cut -d, -f4 | base64 -d | od -An -tx1 -N8
+ 84 3e 81 80 00 01 00 02
+```
+
+TCP のときもメッセージ長ヘッダは付きません。このクエリメッセージは 40 オクテットで、
+TCP で実際に流れるオクテット数はそこに 2 を足した 42 になります。
+
+```console
+$ ./dq -r -s 172.16.253.81 -o base64 -tcp example.com 2>/dev/null | head -1 | cut -d, -f4 | base64 -d | wc -c
+40
+```
+
+応答を受信できなかったときは `sent,` の行だけになります。
+
+```console
+$ ./dq -s 192.0.2.1 -timeout 1 -o base64 -r example.com
+dq: cannot receive message from 192.0.2.1:53(read udp 172.17.0.2:49875->192.0.2.1:53: i/o timeout)
+sent,2026-10-19T11:24:35.365182818Z,udp,1EoBAAABAAAAAAABB2V4YW1wbGUDY29tAAABAAEAACkE0AAAAAAAAA==
 $ echo $?
 1
 ```
@@ -288,15 +349,17 @@ resolv.conf が読めない、または `nameserver` が無いときは `127.0.0
 - 秒は小数でもよく（`-timeout 0.5`）、上限はありません。
 - `0` は無制限です。応答を返すまで待ち続けます。
 - 上限は接続（`net.DialTimeout`）と、その接続の送受信の両方に適用されます
-  （`SendQueryWithTimeout` が `SetDeadline` で締切を設定します）。
+  （`dnsmsg.Exchange` が `SetDeadline` で締切を設定します）。
   接続にかかった時間も待ち時間に含まれます。
 - 負の数はエラーになります。
 
-タイムアウトで失敗したときも送信したクエリは出力され、`"response": null` になります。
+タイムアウトで失敗したときも送信したクエリは出力され、JSON では `"response": null`、
+base64 では `sent,` の行だけになります。
 
 ```console
 $ ./dq -s 192.0.2.1 -timeout 1 -r example.com
 dq: cannot receive message from 192.0.2.1:53(read udp 172.17.0.2:50061->192.0.2.1:53: i/o timeout)
+{ "query": { … 送信したクエリ … }, "response": null }
 $ ./dq -timeout -1 example.com
 dq: -timeout -1 は 0 秒以上で指定してください
 ```
@@ -307,6 +370,7 @@ dq: -timeout -1 は 0 秒以上で指定してください
 ```console
 $ ./dq -s 192.0.2.1 -r example.com
 dq: cannot receive message from 192.0.2.1:53(read udp 172.17.0.2:34972->192.0.2.1:53: i/o timeout)
+{ "query": { … 送信したクエリ … }, "response": null }
 ```
 
 ### EDNS0 と NSID
@@ -328,14 +392,14 @@ OPT を付けない `-no-edns` とは同時に使えません。
 | 終了コード | 意味 |
 |------------|------|
 | 0 | 成功。`-h` で表示を終えるときも 0 |
-| 1 | QCLASS / QTYPE が分からない、送信・受信・JSON 出力に失敗した |
+| 1 | QCLASS / QTYPE が分からない、送信・受信・出力に失敗した |
 | 2 | 使い方のエラー（位置引数が 1 つではない、オプションの組み合わせが不正、ポート番号が範囲外、タイムアウトの値が不正、未対応の出力形式） |
 
 ### 使い方のエラーの例
 
 ```console
 $ ./dq -o yaml example.com
-dq: 出力形式 "yaml" には対応していません (json のみ)
+dq: 出力形式 "yaml" には対応していません (base64, json のみ)
 $ ./dq -tcp -udp example.com
 dq: -tcp と -udp は同時に指定できません
 $ ./dq -nsid -no-edns example.com
@@ -350,8 +414,14 @@ dq: ポート番号 0 が範囲外です
 |------|----------------|
 | クエリの構築 | `Message.SetQuery`（Question セクション）、`Message.SetEDNS0`（OPT と EDNS option） |
 | メッセージ ID | `crypto/rand` による 16 bit の乱数 |
-| 送信・受信 | `SendQueryWithTimeout`（`SendQuery` は既定タイムアウトでこれを呼ぶ。[index.md](index.md) 参照） |
-| JSON 出力 | `Message.MarshalJSON` を `json.MarshalIndent` 経由で出力 |
+| 送信・受信 | `dnsmsg.Exchange`（送受信したオクテット列と時刻を `QueryExchange` で返す。`SendQuery` / `SendQueryWithTimeout` はこれを呼ぶ。[index.md](index.md) 参照） |
+| json 出力 | `Message.MarshalJSON` を `json.MarshalIndent` 経由で出力 |
+| base64 出力 | `QueryExchange` の `QueryWire` / `ReplyWire` を `base64.StdEncoding` で、`SentAt` / `ReceivedAt` を `time.RFC3339Nano` で出力 |
+
+出力形式は `outputFormat` インターフェース（`write(w io.Writer, ex *exchange) error`）で
+受け、`outputFormats` の map で `-o` の名前に対応づけています。
+形式を増やすときは `outputFormat` を実装して map に追加します。
+`exchange` は `dnsmsg.QueryExchange` といっしょに失敗の情報も持つ、CLI 側の型です。
 
 `cmd/dq/main.go` はテストしやすくなるように、引数の解析（`parseArgs`）、
 クエリの構築（`buildQuery`）、処理全体（`run(args, stdout, stderr) int`）に

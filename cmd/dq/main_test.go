@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -48,13 +50,15 @@ func stubAnswer(query dnsmsg.Message, n int) dnsmsg.Message {
 	return reply
 }
 
-// serveUDP answers every query sent to an ephemeral port on 127.0.0.1 with
-// answer(query) until the test ends, and returns that port.
-func serveUDP(t *testing.T, answer func(dnsmsg.Message) dnsmsg.Message) uint16 {
+// serveUDPRaw answers every query sent to an ephemeral port on 127.0.0.1 with
+// the wire format that answer makes from the query octets, and returns that
+// port.  It is the raw form of serveUDP, for the tests that need the exact
+// octets the client sent.
+func serveUDPRaw(t *testing.T, answer func(dnsmsg.WireFormat) dnsmsg.WireFormat) uint16 {
 	t.Helper()
 	ln, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {
-		t.Fatalf("serveUDP: listen: %v", err)
+		t.Fatalf("serveUDPRaw: listen: %v", err)
 	}
 	t.Cleanup(func() { ln.Close() })
 
@@ -65,27 +69,43 @@ func serveUDP(t *testing.T, answer func(dnsmsg.Message) dnsmsg.Message) uint16 {
 			if err != nil {
 				return
 			}
-			query, err := dnsmsg.ParseWireFormat(dnsmsg.WireFormat(buf[:n]))
-			if err != nil {
+			query := make(dnsmsg.WireFormat, n)
+			copy(query, buf[:n])
+			reply := answer(query)
+			if len(reply) == 0 {
 				continue
 			}
-			var w dnsmsg.WireFormat
-			w.WriteWireFormat(answer(query))
-			ln.WriteToUDP([]byte(w), from)
+			ln.WriteToUDP([]byte(reply), from)
 		}
 	}()
 
 	return uint16(ln.LocalAddr().(*net.UDPAddr).Port)
 }
 
-// serveTCP answers every query sent to an ephemeral port on 127.0.0.1 with
-// answer(query) until the test ends, and returns that port.  The reply is
-// written chunk bytes at a time, which makes dq read it in several pieces.
-func serveTCP(t *testing.T, answer func(dnsmsg.Message) dnsmsg.Message, chunk int) uint16 {
+// serveUDP answers every query sent to an ephemeral port on 127.0.0.1 with
+// answer(query) until the test ends, and returns that port.
+func serveUDP(t *testing.T, answer func(dnsmsg.Message) dnsmsg.Message) uint16 {
+	t.Helper()
+	return serveUDPRaw(t, func(query dnsmsg.WireFormat) dnsmsg.WireFormat {
+		msg, err := dnsmsg.ParseWireFormat(query)
+		if err != nil {
+			return nil
+		}
+		var w dnsmsg.WireFormat
+		w.WriteWireFormat(answer(msg))
+		return w
+	})
+}
+
+// serveTCPRaw answers every query sent to an ephemeral port on 127.0.0.1 with
+// the wire format that answer makes from the query octets, and returns that
+// port.  The reply is written chunk bytes at a time, which makes dq read it in
+// several pieces.  It is the raw form of serveTCP.
+func serveTCPRaw(t *testing.T, answer func(dnsmsg.WireFormat) dnsmsg.WireFormat, chunk int) uint16 {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		t.Fatalf("serveTCP: listen: %v", err)
+		t.Fatalf("serveTCPRaw: listen: %v", err)
 	}
 	t.Cleanup(func() { ln.Close() })
 
@@ -106,30 +126,44 @@ func serveTCP(t *testing.T, answer func(dnsmsg.Message) dnsmsg.Message, chunk in
 				if _, err := io.ReadFull(conn, buf); err != nil {
 					return
 				}
-				query, err := dnsmsg.ParseWireFormat(dnsmsg.WireFormat(buf))
-				if err != nil {
+
+				reply := answer(dnsmsg.WireFormat(buf))
+				if len(reply) == 0 {
 					return
 				}
-
-				var w dnsmsg.WireFormat
-				w.WriteWireFormat(answer(query))
-				reply := binary.BigEndian.AppendUint16(nil, uint16(w.Size()))
-				reply = append(reply, w...)
-				for len(reply) > 0 {
+				framed := binary.BigEndian.AppendUint16(nil, uint16(reply.Size()))
+				framed = append(framed, reply...)
+				for len(framed) > 0 {
 					n := chunk
-					if n > len(reply) {
-						n = len(reply)
+					if n > len(framed) {
+						n = len(framed)
 					}
-					if _, err := conn.Write(reply[:n]); err != nil {
+					if _, err := conn.Write(framed[:n]); err != nil {
 						return
 					}
-					reply = reply[n:]
+					framed = framed[n:]
 				}
 			}()
 		}
 	}()
 
 	return uint16(ln.Addr().(*net.TCPAddr).Port)
+}
+
+// serveTCP answers every query sent to an ephemeral port on 127.0.0.1 with
+// answer(query) until the test ends, and returns that port.  The reply is
+// written chunk bytes at a time, which makes dq read it in several pieces.
+func serveTCP(t *testing.T, answer func(dnsmsg.Message) dnsmsg.Message, chunk int) uint16 {
+	t.Helper()
+	return serveTCPRaw(t, func(query dnsmsg.WireFormat) dnsmsg.WireFormat {
+		msg, err := dnsmsg.ParseWireFormat(query)
+		if err != nil {
+			return nil
+		}
+		var w dnsmsg.WireFormat
+		w.WriteWireFormat(answer(msg))
+		return w
+	}, chunk)
 }
 
 // closedTCPPort returns a port on 127.0.0.1 that a TCP connection to it is
@@ -165,13 +199,14 @@ func tempResolvConf(t *testing.T, lines ...string) string {
 	return path
 }
 
-// decodeOutput parses what dq printed on stdout as its JSON document.
-func decodeOutput(t *testing.T, data []byte) outputMessage {
+// decodeOutput parses what dq printed on stdout as the JSON document of the json
+// output format.
+func decodeOutput(t *testing.T, data []byte) jsonDocument {
 	t.Helper()
 	if !json.Valid(data) {
 		t.Fatalf("the output is not a JSON document:\n%s", data)
 	}
-	var out outputMessage
+	var out jsonDocument
 	if err := json.Unmarshal(data, &out); err != nil {
 		t.Fatalf("cannot parse the JSON output: %v\n%s", err, data)
 	}
@@ -385,9 +420,18 @@ func TestParseArgs(t *testing.T) {
 			wantErr: "-nsid は -no-edns と同時に指定できません",
 		},
 		{
+			name: "-o base64",
+			args: []string{"-o", "base64", "example.com"},
+			want: func() options {
+				o := defaults
+				o.output = "base64"
+				return o
+			}(),
+		},
+		{
 			name:    "unsupported output format",
 			args:    []string{"-o", "yaml", "example.com"},
-			wantErr: `出力形式 "yaml" には対応していません`,
+			wantErr: `出力形式 "yaml" には対応していません (base64, json のみ)`,
 		},
 		{
 			name:    "port 0",
@@ -767,6 +811,212 @@ func TestRunJSON(t *testing.T) {
 	}
 }
 
+// base64Line is one line of the base64 output format: the kind of message the
+// line reports, the time it was sent or received, the transport it travelled
+// over, and its octets.
+type base64Line struct {
+	kind      string
+	at        time.Time
+	transport string
+	wire      dnsmsg.WireFormat
+}
+
+// parseBase64Output splits what dq printed with -o base64 into its lines.
+func parseBase64Output(t *testing.T, data []byte) []base64Line {
+	t.Helper()
+
+	text := string(data)
+	if !strings.HasSuffix(text, "\n") {
+		t.Errorf("the base64 output does not end with a newline:\n%s", text)
+	}
+
+	var lines []base64Line
+	for _, line := range strings.Split(strings.TrimSuffix(text, "\n"), "\n") {
+		fields := strings.Split(line, ",")
+		if len(fields) != 4 {
+			t.Fatalf("base64 line %q has %d comma separated fields, want 4", line, len(fields))
+		}
+		at, err := time.Parse(time.RFC3339Nano, fields[1])
+		if err != nil {
+			t.Errorf("base64 line %q does not carry an RFC 3339 time: %v", line, err)
+		}
+		wire, err := base64.StdEncoding.DecodeString(fields[3])
+		if err != nil {
+			t.Fatalf("base64 line %q does not carry base64: %v\n%s", line, err, text)
+		}
+		lines = append(lines, base64Line{
+			kind:      fields[0],
+			at:        at,
+			transport: fields[2],
+			wire:      dnsmsg.WireFormat(wire),
+		})
+	}
+	return lines
+}
+
+// TestRunBase64 runs dq with -o base64 against a stub name server over both
+// transports and checks that the two lines carry the exact octets that went on
+// the wire: the query the stub name server read, and the reply it wrote after
+// its length prefix.
+func TestRunBase64(t *testing.T) {
+	for _, transport := range []string{"-tcp", "-udp"} {
+		t.Run(transport, func(t *testing.T) {
+			var mu sync.Mutex
+			var received, answered dnsmsg.WireFormat
+
+			answer := func(query dnsmsg.WireFormat) dnsmsg.WireFormat {
+				msg, err := dnsmsg.ParseWireFormat(query)
+				if err != nil {
+					t.Errorf("the stub name server cannot parse the query: %v", err)
+					return nil
+				}
+				var w dnsmsg.WireFormat
+				w.WriteWireFormat(stubAnswer(msg, 3))
+
+				mu.Lock()
+				received = append(received[:0], query...)
+				answered = append(answered[:0], w...)
+				mu.Unlock()
+				return w
+			}
+
+			var port uint16
+			if transport == "-tcp" {
+				// A reply of several hundred bytes arrives in small pieces.
+				port = serveTCPRaw(t, answer, 9)
+			} else {
+				port = serveUDPRaw(t, answer)
+			}
+
+			var stdout, stderr bytes.Buffer
+			args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), transport, "-r", "-o", "base64", "example.com"}
+
+			start := time.Now()
+			if code := run(args, &stdout, &stderr); code != 0 {
+				t.Fatalf("run(%v) exit code = %d, want 0\nstderr: %s", args, code, stderr.String())
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("run() printed %q on stderr, want nothing", stderr.String())
+			}
+
+			mu.Lock()
+			wantQuery, wantReply := received, answered
+			mu.Unlock()
+			if len(wantQuery) == 0 {
+				t.Fatal("the stub name server did not read a query")
+			}
+
+			lines := parseBase64Output(t, stdout.Bytes())
+			if len(lines) != 2 {
+				t.Fatalf("the base64 output has %d lines, want a sent line and a recv line:\n%s",
+					len(lines), stdout.String())
+			}
+
+			wantTransport := strings.TrimPrefix(transport, "-")
+			wantKinds := []string{"sent", "recv"}
+			for i, line := range lines {
+				if line.kind != wantKinds[i] {
+					t.Errorf("base64 line %d reports %q, want %q", i, line.kind, wantKinds[i])
+				}
+				if line.transport != wantTransport {
+					t.Errorf("base64 line %d reports transport %q, want %q", i, line.transport, wantTransport)
+				}
+				if line.at.Before(start.Add(-time.Second)) || line.at.After(time.Now().Add(time.Second)) {
+					t.Errorf("base64 line %d is timed at %s, which is outside the time window of this run",
+						i, line.at.Format(time.RFC3339Nano))
+				}
+			}
+			if lines[1].at.Before(lines[0].at) {
+				t.Errorf("the recv line is timed at %s, before the sent line at %s",
+					lines[1].at.Format(time.RFC3339Nano), lines[0].at.Format(time.RFC3339Nano))
+			}
+
+			if !bytes.Equal(lines[0].wire, wantQuery) {
+				t.Errorf("the sent line carries %d octets, want the %d octets the stub name server read",
+					len(lines[0].wire), len(wantQuery))
+			}
+			if !bytes.Equal(lines[1].wire, wantReply) {
+				t.Errorf("the recv line carries %d octets, want the %d octets the stub name server wrote",
+					len(lines[1].wire), len(wantReply))
+			}
+
+			// The octets are the DNS messages themselves, so they parse as such.
+			q, err := dnsmsg.ParseWireFormat(lines[0].wire)
+			if err != nil {
+				t.Fatalf("the sent line does not carry a DNS message: %v", err)
+			}
+			if q.QR != dnsmsg.QRQuery || q.RD != 1 || len(q.QuestionSection) != 1 {
+				t.Errorf("the sent line carries QR %d RD %d with %d questions, want a query with one question",
+					q.QR, q.RD, len(q.QuestionSection))
+			}
+			r, err := dnsmsg.ParseWireFormat(lines[1].wire)
+			if err != nil {
+				t.Fatalf("the recv line does not carry a DNS message: %v", err)
+			}
+			if r.ID != q.ID || r.QR != dnsmsg.QRResponse {
+				t.Errorf("the recv line carries ID %#04x QR %d, want ID %#04x QR 1", r.ID, r.QR, q.ID)
+			}
+			if r.ANCOUNT != 3 || len(r.AnswerSection) != 3 {
+				t.Errorf("the recv line carries ANCOUNT %d with %d answers, want 3", r.ANCOUNT, len(r.AnswerSection))
+			}
+		})
+	}
+}
+
+// TestRunBase64WithoutResponse checks that the base64 format prints only the
+// lines for the messages that really went on the wire: the sent line when no
+// response was read, and no line at all when the query was never sent.
+func TestRunBase64WithoutResponse(t *testing.T) {
+	t.Run("no response", func(t *testing.T) {
+		port := noAnswerListener(t)
+
+		const timeout = 200 * time.Millisecond
+		old := queryTimeout
+		queryTimeout = timeout
+		t.Cleanup(func() { queryTimeout = old })
+
+		var stdout, stderr bytes.Buffer
+		args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(port)), "-tcp", "-o", "base64", "example.com"}
+		if code := run(args, &stdout, &stderr); code != 1 {
+			t.Fatalf("run(%v) exit code = %d, want 1\nstderr: %s", args, code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "dq:") {
+			t.Errorf("run() printed %q on stderr, want an error message", stderr.String())
+		}
+
+		lines := parseBase64Output(t, stdout.Bytes())
+		if len(lines) != 1 {
+			t.Fatalf("the base64 output has %d lines, want only the sent line:\n%s", len(lines), stdout.String())
+		}
+		if lines[0].kind != "sent" || lines[0].transport != "tcp" {
+			t.Errorf("the base64 line reports kind %q transport %q, want kind sent transport tcp",
+				lines[0].kind, lines[0].transport)
+		}
+		msg, err := dnsmsg.ParseWireFormat(lines[0].wire)
+		if err != nil {
+			t.Fatalf("the sent line does not carry a DNS message: %v", err)
+		}
+		if msg.QR != dnsmsg.QRQuery || len(msg.QuestionSection) != 1 {
+			t.Errorf("the sent line carries QR %d with %d questions, want a query with one question",
+				msg.QR, len(msg.QuestionSection))
+		}
+	})
+
+	t.Run("query not sent", func(t *testing.T) {
+		var stdout, stderr bytes.Buffer
+		args := []string{"-s", "127.0.0.1", "-p", strconv.Itoa(int(closedTCPPort(t))), "-tcp", "-o", "base64", "example.com"}
+		if code := run(args, &stdout, &stderr); code != 1 {
+			t.Fatalf("run(%v) exit code = %d, want 1\nstderr: %s", args, code, stderr.String())
+		}
+		if stdout.Len() != 0 {
+			t.Errorf("run() printed %q on stdout, want nothing because no message went on the wire", stdout.String())
+		}
+		if !strings.Contains(stderr.String(), "dq:") {
+			t.Errorf("run() printed %q on stderr, want an error message", stderr.String())
+		}
+	})
+}
+
 // TestRunDefaultServer checks that dq reads the name server it queries from the
 // resolver configuration when -s is not given.
 func TestRunDefaultServer(t *testing.T) {
@@ -1004,7 +1254,8 @@ func TestFirstNameserver(t *testing.T) {
 }
 
 // TestUsageOptions checks that the usage text names every option with a single
-// "-" and states the -timeout default that parseArgs actually uses.
+// "-", states the -timeout default that parseArgs actually uses, and names every
+// output format that parseArgs accepts.
 func TestUsageOptions(t *testing.T) {
 	if queryTimeout != dnsmsg.DefaultQueryTimeout {
 		t.Errorf("queryTimeout = %v, want the documented default %v", queryTimeout, dnsmsg.DefaultQueryTimeout)
@@ -1026,5 +1277,23 @@ func TestUsageOptions(t *testing.T) {
 	wantDefault := "(既定: " + strconv.Itoa(int(queryTimeout.Seconds())) + ")"
 	if !strings.Contains(usage, wantDefault) {
 		t.Errorf("usage does not state the -timeout default %q", wantDefault)
+	}
+
+	oLine := ""
+	for _, line := range strings.Split(usage, "\n") {
+		if strings.HasPrefix(line, "  -o ") {
+			oLine = line
+		}
+	}
+	if oLine == "" {
+		t.Fatal("usage does not list -o")
+	}
+	for _, name := range formatNames() {
+		if !strings.Contains(oLine, name) {
+			t.Errorf("the -o line %q does not name the output format %q", oLine, name)
+		}
+	}
+	if !strings.Contains(oLine, defaultOutput) {
+		t.Errorf("the -o line %q does not state the default output format %q", oLine, defaultOutput)
 	}
 }
