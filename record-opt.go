@@ -13,9 +13,16 @@ import (
 // RecordOPT represents an OPT (Pseudo) record carrying EDNS(0) extensions
 // in the additional section per RFC 6891.
 //
-// The RDATA consists of a version byte, a 16-bit flags field (bit 0x8000
-// is the DNSSEC DO bit, the low four bits hold the EDNS version which
-// must match the VERSION byte) and zero or more EDNS options.
+// Version is the EDNS version and Flags is the 16-bit flags field (bit
+// 0x8000 is the DNSSEC OK bit, the remaining bits are Z).  Neither is part
+// of the RDATA on the wire: RFC 6891 Section 6.1.3 packs the version and
+// the flags, together with the extended RCODE, into the record's TTL field,
+// and the record's CLASS field carries the requestor's UDP payload size
+// (Section 6.1.1).  AppendResourceRecord and ParseResourceRecord translate
+// between those wire fields and this struct, so an OPT record in this
+// package always has Class CLASS_IN and its TTL set to the UDP payload
+// size.  The RDATA of an OPT record holds only the EDNS options, which may
+// be none at all.
 type RecordOPT struct {
 	Version uint8
 	Flags   uint16
@@ -260,10 +267,26 @@ func (r RecordOPT) CanonicalWireFormat() []byte {
 	return *w
 }
 
+// packedTTL returns the value to write in an OPT record's TTL field, the
+// extended RCODE and flags packed as described in RFC 6891 Section 6.1.3:
+//
+//	byte 0 (MSB): extended RCODE
+//	byte 1:       EDNS version
+//	byte 2-3:     flags (DO bit and Z)
+//
+// This package writes an extended RCODE of zero: Message.RCODE is eight
+// bits wide and cannot express the full twelve-bit response code, so a
+// response code such as BADVERS (16) is not representable.
+func (r RecordOPT) packedTTL() uint32 {
+	return uint32(r.Version)<<16 | uint32(r.Flags)
+}
+
+// AppendWireFormat writes the RDATA of an OPT record, which per RFC 6891
+// Section 6.1.2 holds only the EDNS options.  The version, the flags and
+// the extended RCODE belong to the record's TTL field, and the UDP payload
+// size to its CLASS field; AppendResourceRecord writes both.
 func (r RecordOPT) AppendWireFormat(w *WireFormat, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
-	size += w.AppendUInt8(r.Version)
-	size += w.AppendUInt16(r.Flags)
 	for _, opt := range r.Options {
 		data := opt.Data()
 		size += w.AppendUInt16(opt.Code())
@@ -475,9 +498,12 @@ func NewRecordOPTFromString(s string) (r RecordOPT, err error) {
 	return
 }
 
-// ParseRecordOPT parses an OPT record from wire format.  The RDATA is
-// bounded by end, the RDLENGTH-derived offset of the record, rather than
-// the remainder of the whole message.
+// ParseRecordOPT parses the RDATA of an OPT record, which per RFC 6891
+// Section 6.1.2 holds only the EDNS options and may be empty.  The RDATA is
+// bounded by end, the RDLENGTH-derived offset of the record, rather than the
+// remainder of the whole message.  The version, the flags and the UDP payload
+// size are read from the record's TTL and CLASS fields by
+// ParseResourceRecord.
 func ParseRecordOPT(w WireFormat, begin uint32, end uint32) (r RecordOPT, pos uint32, err error) {
 	var p uint32 = begin
 
@@ -485,34 +511,6 @@ func ParseRecordOPT(w WireFormat, begin uint32, end uint32) (r RecordOPT, pos ui
 		err = fmt.Errorf("invalid OPT record RDATA size")
 		return
 	}
-	if end < begin+3 {
-		err = fmt.Errorf("not enough size for OPT record")
-		return
-	}
-
-	version, err := w.GetUInt8(p)
-	if err != nil {
-		err = fmt.Errorf("cannot parse version: %w", err)
-		return
-	}
-	p += 1
-
-	flags, err := w.GetUInt16(p)
-	if err != nil {
-		err = fmt.Errorf("cannot parse flags: %w", err)
-		return
-	}
-	p += 2
-
-	// Per RFC 6891 Section 6.1.3, the EDNS version in the flags field
-	// (the low four bits) must match the VERSION byte.
-	if uint8(flags&0x0f) != version {
-		err = fmt.Errorf("EDNS version mismatch: flags=%d version=%d", flags, version)
-		return
-	}
-
-	r.Version = version
-	r.Flags = flags
 
 	for p < end {
 		if end-p < 4 {

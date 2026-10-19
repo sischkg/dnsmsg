@@ -5,9 +5,11 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"regexp"
 	"strconv"
+	"time"
 )
 
 const UDP_BUFFER_SIZE = 1 << 12
@@ -416,12 +418,51 @@ func (rr *ResourceRecord) unmarshalRData(data json.RawMessage) error {
 	return nil
 }
 
+// rrClassField returns the value to write in a record's CLASS field.  An OPT
+// record writes the requestor's UDP payload size, which this package keeps in
+// the record's TTL, instead of a class (RFC 6891 Section 6.1.1).  A payload
+// size larger than the field can hold is truncated to its low sixteen bits.
+func rrClassField(rr ResourceRecord) uint16 {
+	switch rr.RData.(type) {
+	case RecordOPT, *RecordOPT:
+		return uint16(rr.TTL)
+	}
+	return uint16(rr.Class)
+}
+
+// rrTTLField returns the value to write in a record's TTL field.  An OPT
+// record writes the packed extended RCODE, version and flags instead of a
+// time to live (RFC 6891 Section 6.1.3).
+func rrTTLField(rr ResourceRecord) uint32 {
+	switch opt := rr.RData.(type) {
+	case RecordOPT:
+		return opt.packedTTL()
+	case *RecordOPT:
+		return opt.packedTTL()
+	}
+	return rr.TTL
+}
+
+// unpackOPTFields undoes the packing of an OPT record's wire fields that
+// AppendResourceRecord applies: the CLASS field carries the requestor's UDP
+// payload size and the TTL field the extended RCODE, the version and the
+// flags (RFC 6891 Section 6.1.1 and 6.1.3).  The record is stored with Class
+// CLASS_IN and TTL set to the payload size, which is the form this package
+// uses for OPT records in memory.  The extended RCODE is discarded, because
+// Message.RCODE is eight bits wide and cannot express it.
+func unpackOPTFields(rr *ResourceRecord, opt *RecordOPT) {
+	opt.Version = uint8(rr.TTL >> 16)
+	opt.Flags = uint16(rr.TTL)
+	rr.TTL = uint32(rr.Class)
+	rr.Class = CLASS_IN
+}
+
 func AppendResourceRecord(w *WireFormat, rr ResourceRecord, db *NameCompressionDB) uint32 {
 	var size uint32 = 0
 	size += w.AppendDomainName(rr.Name, db)
 	size += w.AppendUInt16(uint16(rr.Type))
-	size += w.AppendUInt16(uint16(rr.Class))
-	size += w.AppendUInt32(rr.TTL)
+	size += w.AppendUInt16(rrClassField(rr))
+	size += w.AppendUInt32(rrTTLField(rr))
 	posRDLen := w.Size()
 	size += w.AppendUInt16(0) // dummy data
 	rdlen := rr.RData.AppendWireFormat(w, db)
@@ -468,7 +509,12 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 	case TYPE_DS:
 		rr.RData, _, err = ParseRecordDS(w, p, end)
 	case TYPE_OPT:
-		rr.RData, _, err = ParseRecordOPT(w, p, end)
+		var opt RecordOPT
+		opt, _, err = ParseRecordOPT(w, p, end)
+		if err == nil {
+			unpackOPTFields(&rr, &opt)
+			rr.RData = opt
+		}
 	case TYPE_RRSIG:
 		rr.RData, _, err = ParseRecordRRSIG(w, p, end)
 	case TYPE_DNSKEY:
@@ -795,68 +841,83 @@ func ParseWireFormat(w WireFormat) (msg Message, err error) {
 	return
 }
 
-func SendQuery(query Message, target string, port uint16, transport string) (reply Message, err error) {
+// DefaultQueryTimeout is the connect, write and read timeout that SendQuery
+// applies to a query.  Without a timeout a UDP query to a server that never
+// answers blocks forever.
+const DefaultQueryTimeout = 5 * time.Second
+
+// SendQuery sends query to target:port over transport (DNSoverUDP or
+// DNSoverTCP) and parses the reply it receives.  It is SendQueryWithTimeout
+// with the DefaultQueryTimeout timeout.
+func SendQuery(query Message, target string, port uint16, transport string) (Message, error) {
+	return SendQueryWithTimeout(query, target, port, transport, DefaultQueryTimeout)
+}
+
+// SendQueryWithTimeout sends query to target:port over transport (DNSoverUDP
+// or DNSoverTCP) and parses the reply it receives.  timeout limits the
+// connect, write and read steps; a timeout of zero or less means no timeout.
+//
+// Over TCP both messages are framed with the two-octet big-endian length
+// prefix of RFC 1035 section 4.2.  The reply is read with io.ReadFull, so a
+// reply that arrives split over several segments is read completely.
+func SendQueryWithTimeout(query Message, target string, port uint16, transport string, timeout time.Duration) (reply Message, err error) {
 	var q, r WireFormat
 	q.WriteWireFormat(query)
 
+	if transport != DNSoverUDP && transport != DNSoverTCP {
+		err = fmt.Errorf("unknown transport %s", transport)
+		return
+	}
+
 	endpoint := net.JoinHostPort(target, strconv.Itoa(int(port)))
-	if transport == DNSoverUDP {
-		udp, e := net.Dial("udp", endpoint)
-		if e != nil {
-			err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
+	conn, e := net.DialTimeout(transport, endpoint, timeout)
+	if e != nil {
+		err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
+		return
+	}
+	defer conn.Close()
+
+	if timeout > 0 {
+		if e = conn.SetDeadline(time.Now().Add(timeout)); e != nil {
+			err = fmt.Errorf("cannot set timeout for %s:%d(%s)", target, port, e)
 			return
 		}
-		_, e = udp.Write([]byte(q))
-		if e != nil {
+	}
+
+	if transport == DNSoverUDP {
+		if _, e = conn.Write([]byte(q)); e != nil {
 			err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
 			return
 		}
 		buf := make([]byte, UDP_BUFFER_SIZE)
-		_, e = udp.Read(buf)
+		n, e := conn.Read(buf)
 		if e != nil {
 			err = fmt.Errorf("cannot receive message from %s:%d(%s)", target, port, e)
 			return
 		}
-		r = WireFormat(buf)
-	} else if transport == DNSoverTCP {
-		tcp, e := net.Dial("tcp", endpoint)
-		if e != nil {
-			err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
-			return
-		}
-
-		var sendSize []byte
-		sendSize = binary.BigEndian.AppendUint16(sendSize, uint16(q.Size()))
-		_, e = tcp.Write(sendSize)
-		if e != nil {
+		r = WireFormat(buf[:n])
+	} else {
+		sendSize := binary.BigEndian.AppendUint16(nil, uint16(q.Size()))
+		if _, e = conn.Write(sendSize); e != nil {
 			err = fmt.Errorf("cannot send payload size to %s:%d(%s)", target, port, e)
 			return
 		}
-		_, e = tcp.Write([]byte(q))
-		if e != nil {
+		if _, e = conn.Write([]byte(q)); e != nil {
 			err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
 			return
 		}
 
 		recvSizeBuf := make([]byte, 2)
-		_, e = tcp.Read(recvSizeBuf)
-		if e != nil {
+		if _, e = io.ReadFull(conn, recvSizeBuf); e != nil {
 			err = fmt.Errorf("cannot receive payload size from %s:%d(%s)", target, port, e)
 			return
 		}
-		var recvSize uint16
-		binary.Decode(recvSizeBuf, binary.NativeEndian, recvSize)
-
-		buf := make([]byte, recvSize)
-		_, e = tcp.Read(buf)
-		if e != nil {
+		buf := make([]byte, binary.BigEndian.Uint16(recvSizeBuf))
+		if _, e = io.ReadFull(conn, buf); e != nil {
 			err = fmt.Errorf("cannot receive message from %s:%d(%s)", target, port, e)
 			return
 		}
 		r = WireFormat(buf)
-	} else {
-		err = fmt.Errorf("unknown transport %s", transport)
-		return
 	}
 
 	reply, err = ParseWireFormat(r)

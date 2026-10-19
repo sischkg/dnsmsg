@@ -7,17 +7,39 @@ EDNS(0)（RFC 6891）は additional データセクションに置く OPT 擬似
 
 ## OPT レコードの構造
 
-OPT レコードの各フィールドは以下のように使われます。
+wire format 上の OPT レコードの各フィールドは RFC 6891 のとおり扱われます。
 
-| フィールド | 内容 |
-|------------|------|
-| Name     | root（空ドメイン名。`ResourceRecord.String()` の表示では先頭が空になる） |
-| Class    | `CLASS_IN` (1) |
-| TTL      | 拡張 UDP ペイロードサイズ（例: `EDNS0DefaultPayloadSize` = 1232） |
-| RDATA    | `VERSION`（1 byte）+ `FLAGS`（2 bytes）+ EDNS オプション（0 個以上） |
+| フィールド | wire format 上の内容 |
+|------------|----------------------|
+| Name     | root（1 バイト `00`。`ResourceRecord.String()` の表示では `"."` になる） |
+| TYPE     | 41（`TYPE_OPT`） |
+| Class    | 要求者の拡張 UDP ペイロードサイズ（例: `EDNS0DefaultPayloadSize` = 1232） |
+| TTL      | `EXTENDED-RCODE`（1 byte）+ `VERSION`（1 byte）+ `DO`（1 bit）+ `Z`（15 bits） |
+| RDATA    | EDNS オプション（0 個以上）。各オプションは `CODE`（2 bytes）+ `LENGTH`（2 bytes）+ `DATA` |
 
-RDATA の flags 下位 4 bit は EDNS バージョンで、`VERSION` バイトと一致しなければ
-パース時にエラーになります。
+RDATA は空でもよく（RDLENGTH 0 の OPT は 0 オプションの正常な OPT です）、
+VERSION も DO bit も RDATA ではなく TTL フィールドに載ります。
+
+### in-memory の `RecordOPT` との対応
+
+Go の値としての `RecordOPT` は RFC のwire 表現をそのまま写すのではなく、
+読みやすい形に保つようにしています。変換は `AppendResourceRecord`（書き出し）と
+`ParseResourceRecord`（受信）が行い、`RecordOPT` のフィールド自体は wire の
+並び順に依存しません。
+
+| `RecordOPT` / `ResourceRecord` | wire フィールド |
+|--------------------------------|-----------------|
+| `rr.Class`（常に `CLASS_IN`）   | 書き出し時は TTL へ、受信時は CLASS から復元 |
+| `rr.TTL`（拡張 UDP ペイロードサイズ） | CLASS |
+| `opt.Version`                  | TTL byte 1（`(TTL >> 16) & 0xff`） |
+| `opt.Flags`                    | TTL byte 2-3（`TTL & 0xffff`、DO bit は `0x8000`） |
+| `opt.Options`                  | RDATA の OPTION-CODE / OPTION-LENGTH / OPTION-DATA |
+
+`RecordOPT` には EXTENDED-RCODE を保持する場所がありません。TTL の最上位バイトは
+`ParseResourceRecord` によって `rr.TTL`（ペイロードサイズ）へ置き換えられるため、
+**拡張 RCODE は破棄されます**（RFC 6891 では RCODE 16 = BADVERS のように、
+上位 8 bit は OPT レコードの TTL に載ります）。
+`Message.RCODE` は 8 bit なので 12 bit の RCODE は表現できません。
 
 ## 主要な API
 
@@ -26,10 +48,16 @@ RDATA の flags 下位 4 bit は EDNS バージョンで、`VERSION` バイト�
 | `Message.SetEDNS0(payloadSize uint32, flags uint16, options ...EDNSOption)` | OPT レコードを追加セクションに設定する。既存の OPT を**置換**し、`ARCOUNT` の増加は 1 回のみ（繰り返し呼び出しでも冪等）。エラーは返さない |
 | `NewRecordOPT(version uint8, flags uint16, options ...EDNSOption) RecordOPT` | OPT レコード構造体を直接作る |
 | `NewRecordOPTFromString(s string) (RecordOPT, error)` | プレゼンテーション形式文字列から OPT を作る |
-| `ParseRecordOPT(w WireFormat, begin uint32, end uint32) (RecordOPT, uint32, error)` | wire format から OPT をパース（`ParseWireFormat` が内部で呼ぶ） |
+| `ParseRecordOPT(w WireFormat, begin uint32, end uint32) (RecordOPT, uint32, error)` | RDATA ウィンドウ `[begin, end)` から **EDNS オプション列のみ**をパース（`ParseWireFormat` が内部で呼ぶ）。CLASS/TTL ↔ `Version`/`Flags`/ペイロードサイズの変換は行わない |
 | `NewEDNSOptionNSID(nsid string) (EDNSOptionNSID, error)` | NSID オプション（RFC 7873）。ID は 1〜255 文字の可印 ASCII |
 | `NewEDNSOptionEDE(errorCode uint16, extraText string) EDNSOptionEDE` | EDE オプション（RFC 8914）。エラーは返さない |
 | `RegisterEDNSOptionParser(code uint16, p func(data []byte) EDNSOption)` | オプションコード用のパーサを登録。登録済みのコードの上書きになる |
+
+`RecordOPT.AppendWireFormat` / `RecordOPT.CanonicalWireFormat` は OPT の RDATA
+（EDNS オプション列）だけを返し、NAME/TYPE/CLASS/TTL/RDLENGTH は含みません。
+完全な OPT レコードとして書き出すのは `ResourceRecord.AppendWireFormat` で、
+そこでは RFC 6891 に従って CLASS にペイロードサイズ、TTL に
+VERSION+FLAGS が書かれます。
 
 よく使う定数と option code:
 
@@ -65,18 +93,27 @@ opt := query.AdditionalSection[0].RData.(dnsmsg.RecordOPT)
 
 wire := new(dnsmsg.WireFormat)
 wire.WriteWireFormat(query)
-// wire.Size() == 47
+// wire.Size() == 44
 ```
 
 検証済み出力:
 
-- OPT レコードの表示（`ResourceRecord.String()`）: `" 1 41 1232 8000"`（name は root なので空白始まり。class=1, type=41, ttl=1232, RDATA=`"8000"`）
+- OPT レコードの表示（`ResourceRecord.String()`）: `". 1 41 1232 8000"`（name は root なので `"."`。class=1, type=41, ttl=1232, RDATA 表示=`"8000"`）
 - `RecordOPT.String()`: `"8000"`（flags は 4 桁 hex 表示）
-- wire format（47 バイト）:
-  `de ad 01 00 00 01 00 00 00 00 00 01 03 77 77 77 07 65 78 61 6d 70 6c 65 03 63 6f 6d 00 00 01 00 01 00 00 29 00 01 00 00 04 d0 00 03 00 80 00`
-  - `00 00 04 d0` = TTL 1232（ペイロードサイズ）
-  - `00 03 00 80 00` = RDATA 3 バイト: VERSION=0, FLAGS=0x8000（DO）
-  - 末尾の `00` は root 名（OPT の Name）
+- wire format（44 バイト）:
+  `de ad 01 00 00 01 00 00 00 00 00 01 03 77 77 77 07 65 78 61 6d 70 6c 65 03 63 6f 6d 00 00 01 00 01 00 00 29 04 d0 00 00 80 00 00 00`
+- OPT レコード部分（末尾 11 バイト）:
+
+  ```
+  00                       ;; NAME = root
+  00 29                    ;; TYPE = 41 (OPT)
+  04 d0                    ;; CLASS = 1232（要求者の拡張 UDP ペイロードサイズ）
+  00 00 80 00              ;; TTL: EXTENDED-RCODE=0, VERSION=0, DO=1, Z=0
+  00 00                    ;; RDLENGTH = 0（EDNS オプションなし）
+  ```
+
+DO bit が立っていてもオプションが無いので RDATA は空です（RFC 6891 の
+「DO は TTL フィールドのフラグ」であり、DNSSEC オプションではありません）。
 
 ## NSID オプション（RFC 7873）
 
@@ -91,14 +128,16 @@ query.SetEDNS0(1232, 0, nsid)
 
 var w dnsmsg.WireFormat
 w.WriteWireFormat(query)
-// w.Size() == 59
+// w.Size() == 56
 ```
 
-検証済み wire（OPT の RDATA 部分のみ）:
+検証済み OPT レコード部分（19 バイト）:
 
-`00 00 00 00 03 00 08 4d 59 2d 4e 53 2d 30 31`
+`00 00 29 04 d0 00 00 00 00 00 0c 00 03 00 08 4d 59 2d 4e 53 2d 30 31`
 
-- `00 00` = VERSION / FLAGS（flags は 0）
+- `04 d0` = CLASS = 1232（拡張 UDP ペイロードサイズ）
+- `00 00 00 00` = TTL（EXTENDED-RCODE=0, VERSION=0, FLAGS=0）
+- `00 0c` = RDLENGTH 12
 - `00 03` = option code 3（NSID）
 - `00 08` = option data 長 8
 - `4d 59 2d 4e 53 2d 30 31` = `"MY-NS-01"`
@@ -119,13 +158,14 @@ resp.SetEDNS0(dnsmsg.EDNS0DefaultPayloadSize, 0,
 
 var w dnsmsg.WireFormat
 w.WriteWireFormat(resp)
-// w.Size() == 70
+// w.Size() == 67
 ```
 
-検証済み wire（OPT の RDATA 部分のみ）:
+検証済み OPT レコード部分（29 バイト）:
 
-`00 00 00 0f 00 11 00 03 61 6e 73 77 65 72 20 69 73 20 73 74 61 6c 65`
+`00 00 29 04 d0 00 00 00 00 00 15 00 0f 00 11 00 03 61 6e 73 77 65 72 20 69 73 20 73 74 61 6c 65`
 
+- `00 15` = RDLENGTH 21
 - `00 0f` = option code 15（EDE）
 - `00 11` = option data 長 17
 - `00 03` = EDE INFO-CODE 3（`EDECodeStaleAnswer`）
@@ -161,7 +201,8 @@ query.SetQuery("www.example.com.", dnsmsg.CLASS_IN, dnsmsg.TYPE_A)
 query.SetEDNS0(1232, 0, raw)
 ```
 
-検証済み wire（OPT の RDATA 部分）: `00 00 00 04 00 02 19 02`
+検証済み OPT レコード部分: `00 00 29 04 d0 00 00 00 00 00 06 00 04 00 02 19 02`
+（RDATA は `00 04 00 02 19 02`、メッセージ全体は 50 バイト）
 パース後、option はそのまま `EDNSOptionRaw{OptionCode: 4, OptionData: [0x19, 0x02]}`
 に戻り、`String()` は `"4 1902"`（code と hex data）になります。
 
@@ -190,7 +231,9 @@ query.SetQuery("www.example.com.", dnsmsg.CLASS_IN, dnsmsg.TYPE_A)
 query.SetEDNS0(1232, 0, customOption{value: []byte("hello")})
 ```
 
-検証済み wire（OPT の RDATA 部分）: `00 00 00 0a 00 05 68 65 6c 6c 6f`
+検証済み OPT レコード部分（17 バイト）:
+`00 00 29 04 d0 00 00 00 00 00 09 00 0a 00 05 68 65 6c 6c 6f`
+（RDATA は `00 0a 00 05 68 65 6c 6c 6f`、メッセージ全体は 52 バイト）
 
 受信側でこのコードの option を型付き値として取り出したい場合は
 `RegisterEDNSOptionParser` でパーサを登録します。
@@ -247,15 +290,17 @@ for _, rr := range msg.AdditionalSection {
 
 パース時の挙動:
 
-- `VERSION` バイトと `FLAGS` 下位 4 bit が不一致 → エラー
+- RDATA が空（RDLENGTH 0）→ 0 オプションの**正常な** OPT として成功する
+- VERSION と FLAGS は RDATA ではなく TTL フィールドから復元される（不一致チェックはしない）
 - オプションの code(2)+length(2) ヘッダが 4 バイト未満で途切れている → エラー
 - 登録のないオプションコード → `EDNSOptionRaw` に格納（エラーにはしない）
 - EDE で data が 2 バイト未満 → `EDNSOptionRaw`（code 15）に格納（エラーにはしない）
+- TTL の最上位バイト（EXTENDED-RCODE）は復元されず破棄される
 
-## クエリの送信（UDP）
+## クエリの送信（UDP / TCP）
 
-`SendQuery` はパッケージ関数で、構築した `Message` を UDP/TCP で送り、
-レスポンスの `Message` を返します。
+`SendQuery` はパッケージ関数で、構築した `Message` を UDP または TCP で送り、
+受信したレスポンスの `Message` を返します。
 
 ```go
 var query dnsmsg.Message
@@ -269,7 +314,26 @@ reply, err := dnsmsg.SendQuery(query, "127.0.0.1", 53, dnsmsg.DNSoverUDP)
 ```
 
 transport 引数は `dnsmsg.DNSoverUDP` ("udp") または `dnsmsg.DNSoverTCP` ("tcp")
-です。TCP はメッセージ先頭に 2 バイト長の長さプレフィックスが付きます。
+です。TCP は両方向でメッセージ先頭に 2 バイトの長さプレフィックスが付きます
+（RFC 1035 4.2）。TCP の応答は `io.ReadFull` で読むため、複数のセグメントに
+分割して届いても最後まで読みます。UDP の応答は `UDP_BUFFER_SIZE` のバッファで
+1 回だけ読み、実際に読めた長さだけを解析します。
+
+`SendQuery` は接続・送信・受信の各ステップに `DefaultQueryTimeout`（5 秒）を
+適用します。タイムアウトを自前で決めたい場合は `SendQueryWithTimeout` を使います。
+
+```go
+reply, err := dnsmsg.SendQueryWithTimeout(query, "127.0.0.1", 53,
+    dnsmsg.DNSoverTCP, 2*time.Second)
+```
+
+`timeout` が 0 以下ならタイムアウトなし（応答があるまで待ち続ける）。
+`target` は IP アドレスでもホスト名でもよく、解決は `net.DialTimeout` に任せます。
+
+- 応答の `TC` bit が立っていても、自動で TCP 問い合わせをやり直すことはしません。
+  送信したメッセージと受信したメッセージは 1 対 1 です。
+- 応答が届かない・タイムアウトした場合は `Message` ではなく `error` が返ります。
+- 未知の transport 文字列は接続前に `unknown transport <s>` で失敗します。
 
 ## 補足
 
@@ -307,7 +371,7 @@ transport 引数は `dnsmsg.DNSoverUDP` ("udp") または `dnsmsg.DNSoverTCP` ("
 | `opt.Flags`   | FLAGS（DNSSEC ビットは `EDNS0FlagDO` = `0x8000`） |
 | `opt.Options` | オプションの列（wire 順、`[]EDNSOption`） |
 
-### 例 1: DO ビットのみ（検証済み 47 バイト wire）
+### 例 1: DO ビットのみ（検証済み 44 バイト wire）
 
 ```
 de ad 01 00                        ;; ID=0xdead, FLAGS=0x0100 (RD)
@@ -317,10 +381,9 @@ de ad 01 00                        ;; ID=0xdead, FLAGS=0x0100 (RD)
 03 63 6f 6d 00                     ;; www.example.com
 00 01 00 01                        ;; QTYPE=A, QCLASS=IN
 00                                 ;; OPT name (root)
-00 29 00 01                        ;; TYPE=OPT(41), CLASS=IN(1)
-00 00 04 d0                        ;; TTL=1232
-00 03                              ;; RDLENGTH=3
-00 80 00                           ;; RDATA: VERSION=0, FLAGS=0x8000 (DO)
+00 29 04 d0                        ;; TYPE=OPT(41), CLASS=1232 (UDP ペイロードサイズ)
+00 00 80 00                        ;; TTL: EXTENDED-RCODE=0, VERSION=0, FLAGS=0x8000 (DO)
+00 00                              ;; RDLENGTH=0（オプションなし）
 ```
 
 ```go
@@ -328,8 +391,7 @@ wire, _ := hex.DecodeString(
     "dead0100" + "0001000000000001" +
     "03777777076578616d706c6503636f6d00" +
     "0001" + "0001" +
-    "00" + "0029" + "0001" + "000004d0" + "0003" +
-    "00" + "8000",
+    "00" + "0029" + "04d0" + "00008000" + "0000",
 )
 
 msg, err := dnsmsg.ParseWireFormat(wire)
@@ -355,12 +417,13 @@ if (opt.Flags & dnsmsg.EDNS0FlagDO) != 0 {
 検証済み結果:
 
 - `msg.QDCOUNT == 1`、`msg.ARCOUNT == 1`、`msg.RD == 1`、`len(msg.AdditionalSection) == 1`
-- `rr.Type == TYPE_OPT`、`rr.Class == CLASS_IN`、`rr.Name` は空（root）、`rr.TTL == 1232`
+- `rr.Type == TYPE_OPT`、`rr.Class == CLASS_IN`（wire の CLASS 1232 から復元）、
+  `rr.Name` は root（`rr.String()` では `.` と表示）、`rr.TTL == 1232`
 - `opt.Version == 0`、`opt.Flags == 0x8000`、`len(opt.Options) == 0`
 - `opt.String()` == `"8000"`
-- `rr.String()` == `" 1 41 1232 8000"`
+- `rr.String()` == `". 1 41 1232 8000"`
 
-### 例 2: NSID オプション（検証済み 59 バイト wire）
+### 例 2: NSID オプション（検証済み 56 バイト wire）
 
 ```
 de ad 00 00                        ;; ID=0xdead, FLAGS=0x0000
@@ -370,10 +433,9 @@ de ad 00 00                        ;; ID=0xdead, FLAGS=0x0000
 03 63 6f 6d 00                     ;; www.example.com
 00 01 00 01                        ;; QTYPE=A, QCLASS=IN
 00                                 ;; OPT name (root)
-00 29 00 01                        ;; TYPE=OPT, CLASS=IN
-00 00 04 d0                        ;; TTL=1232 (拡張 UDP ペイロードサイズ)
-00 0f                              ;; RDLENGTH=15
-00 00 00                           ;; VERSION=0, FLAGS=0x0000
+00 29 04 d0                        ;; TYPE=OPT, CLASS=1232
+00 00 00 00                        ;; TTL: EXTENDED-RCODE=0, VERSION=0, FLAGS=0x0000
+00 0c                              ;; RDLENGTH=12
 00 03 00 08                        ;; OPT-CODE=3 (NSID), OPTIONS-LENGTH=8
 4d 59 2d 4e 53 2d 30 31            ;; OPTION-DATA = "MY-NS-01"
 ```
@@ -383,8 +445,7 @@ wire, _ := hex.DecodeString(
     "dead0000" + "0001000000000001" +
     "03777777076578616d706c6503636f6d00" +
     "0001" + "0001" +
-    "00" + "0029" + "0001" + "000004d0" + "000f" +
-    "00" + "0000" +
+    "00" + "0029" + "04d0" + "00000000" + "000c" +
     "0003" + "0008" + "4d592d4e532d3031",
 )
 
@@ -410,7 +471,8 @@ if len(opt.Options) > 0 {
 ```
 
 検証済み結果: `opt.Flags == 0`、`len(opt.Options) == 1`、
-`opt.Options[0].String()` == `"NSID 4d592d4e532d3031"`。
+`opt.Options[0].String()` == `"NSID 4d592d4e532d3031"`、
+`rr.String()` == `". 1 41 1232 0000 NSID 4d592d4e532d3031"`。
 
 ### ParseRecordOPT（RDATA の直接パース）
 
@@ -418,11 +480,16 @@ if len(opt.Options) > 0 {
 func ParseRecordOPT(w WireFormat, begin uint32, end uint32) (RecordOPT, uint32, error)
 ```
 
-- RDATA は `w` 上のウィンドウ `[begin, end)` として解釈されます。
-  `ParseWireFormat` 経由で呼ばれた場合は RDLENGTH から導かれる
+- RDATA は `w` 上のウィンドウ `[begin, end)` として解釈され、その中身は
+  RFC 6891 の OPTION-CODE / OPTIONS-LENGTH / OPTION-DATA の並び**だけ**です。
+  VERSION・FLAGS・拡張 UDP ペイロードサイズは RDATA には無いので、この関数は
+  `Version`・`Flags` を設定しません（`ResourceRecord` の TTL・CLASS フィールドから
+  `ParseResourceRecord` が復元します）。
+- `ParseWireFormat` 経由で呼ばれた場合は RDLENGTH から導かれる
   RDATA 開始/終了オフセットが渡されるため、
   単独呼び出しでは RDATA の byte 列を `w` として `begin = 0`、
   `end = len(RDATA)` とするのが等価です。
+- RDATA が空（RDLENGTH 0）は**正常**で、オプション 0 件の `RecordOPT` になります。
 - 成功時は第 2 戻り値 `pos` がウィンドウ末尾（`end`）を返します。
 - エラー時は `pos` は `begin` のままで前進しません。
   エラー時は返却された `RecordOPT` の使用を避けてエラーだけを見てください。
@@ -432,14 +499,13 @@ func ParseRecordOPT(w WireFormat, begin uint32, end uint32) (RecordOPT, uint32, 
 | 条件 | エラー |
 |------|--------|
 | ウィンドウがメッセージサイズを超えている | `invalid OPT record RDATA size` |
-| RDATA が 3 バイト未満（VERSION+FLAGS が収まらない） | `not enough size for OPT record` |
-| VERSION バイトと FLAGS 下位 4 bit が不一致 | `EDNS version mismatch: flags=<FLAGS> version=<VERSION>` |
-| オプションヘッダ (CODE 2B + LENGTH 2B) が残りの 4 バイト未満 | `truncated EDNS option` |
-| 宣言された LENGTH が残りのバイト長を超える | `EDNS option exceeds RDATA` |
+| 残りの RDATA が 4 バイト未満でオプションヘッダ (CODE 2B + LENGTH 2B) が途切れている | `truncated EDNS option` |
+| 宣言された OPTIONS-LENGTH が残りのバイト長を超える | `EDNS option exceeds RDATA` |
 
-> 注: version mismatch のメッセージでは `flags` が **16 bit 全体の FLAGS**、
-> `version` が VERSION バイトです（RDATA `00 0001` に対して
-> `EDNS version mismatch: flags=1 version=0` になって実測確認済み）。
+> 注: 旧版にあった `not enough size for OPT record`（RDATA が 3 バイト未満）と
+> `EDNS version mismatch: ...`（VERSION と FLAGS 下位 bit の不一致）は、
+> VERSION・FLAGS が RDATA では無くなったため発生しません。
+> 3 バイト以下の RDATA は `truncated EDNS option` になります。
 
 一方、次の場合は**エラーにならず** `EDNSOptionRaw` に格納されます:
 
@@ -448,50 +514,72 @@ func ParseRecordOPT(w WireFormat, begin uint32, end uint32) (RecordOPT, uint32, 
 
 検証済み例:
 
+検証済み例（RDATA はオプション列だけ。VERSION・FLAGS を含まない）:
+
 ```go
-// (a) EDE (RFC 8914): RDATA 24 バイト — INFO-CODE=3 + EXTRA-TEXT "answer is stale"
+// (a) EDE (RFC 8914): RDATA 21 バイト — INFO-CODE=3 + EXTRA-TEXT "answer is stale"
 rdata, _ := hex.DecodeString(
-    "00" +                            // VERSION=0
-    "0000" +                          // FLAGS=0x0000
     "000f" +                          // OPT-CODE=15 (EDE)
     "0011" +                          // OPTIONS-LENGTH=17 (INFO-CODE + EXTRA-TEXT)
     "0003" +                          // INFO-CODE=3 (EDECodeStaleAnswer)
     "616e73776572206973207374616c65", // "answer is stale"
 )
-opt, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 24)
+opt, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 21)
 ```
 
-- `err == nil`、`pos == 24`
+- `err == nil`、`pos == 21`
 - `opt.Options[0]` は `dnsmsg.EDNSOptionEDE{ErrorCode: 3, ExtraText: "answer is stale"}`
 - `opt.Options[0].String()` == `EDE 3 "answer is stale"`
+- `opt.Version == 0`、`opt.Flags == 0`（この関数は設定しない）なので
+  `opt.String()` == `0000 EDE 3 "answer is stale"`
 
 ```go
 // (b) EDE data が 1 バイト ("A") の場合: エラーでは無く EDNSOptionRaw
-rdata, _ := hex.DecodeString("00" + "0000" + "000f" + "0001" + "41")
-opt, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 8)
-// err == nil, pos == 8
+rdata, _ := hex.DecodeString("000f" + "0001" + "41")
+opt, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 5)
+// err == nil, pos == 5
 // opt.Options[0] は dnsmsg.EDNSOptionRaw{OptionCode: 15, OptionData: []byte{0x41}}
 ```
 
 ```go
-// (c) VERSION と FLAGS 下位 4 bit が不一致 → エラー
-rdata, _ := hex.DecodeString("00" + "0001") // VERSION=0, FLAGS=0x0001
+// (c) オプションヘッダが途切れている（残り 3 バイト）
+rdata, _ := hex.DecodeString("0003" + "00")
 _, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 3)
-// err は `EDNS version mismatch: flags=1 version=0`
+// err は `truncated EDNS option`
 // pos == 0（前進しない）
 ```
 
 ```go
-// (d) 複数オプション: DNSSEC + NSID("ednsx")
+// (d) 宣言された OPTIONS-LENGTH (8) が残り (2 バイト) を超えている
+rdata, _ := hex.DecodeString("0003" + "0008" + "4d59")
+_, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 6)
+// err は `EDNS option exceeds RDATA`
+// pos == 0
+```
+
+```go
+// (e) 複数オプション: DNSSEC (DO) + NSID("ednsx") — RDATA 13 バイト
 rdata, _ := hex.DecodeString(
-    "00" +                     // VERSION=0
-    "0000" +                   // FLAGS=0x0000
-    "0001" + "0000" +          // OPT-CODE=1 (DNSSEC), LENGTH=0
-    "0003" + "0005" +          // OPT-CODE=3 (NSID), LENGTH=5
+    "0001" + "0000" +          // OPT-CODE=1 (DNSSEC), OPTIONS-LENGTH=0
+    "0003" + "0005" +          // OPT-CODE=3 (NSID), OPTIONS-LENGTH=5
     "65646e7378",              // "ednsx"
 )
-opt, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 16)
-// err == nil, pos == 16
+opt, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 13)
+// err == nil, pos == 13
 // opt.Options[0] は dnsmsg.EDNSOptionDNSSEC{}
 // opt.Options[1] は dnsmsg.EDNSOptionNSID{ID: "ednsx"}
+```
+
+```go
+// (f) RDATA 空（RDLENGTH 0）: 正常な OPT（オプション 0 件）
+_, pos, err := dnsmsg.ParseRecordOPT(dnsmsg.WireFormat{}, 0, 0)
+// err == nil, pos == 0, len(opt.Options) == 0
+```
+
+```go
+// (g) ウィンドウが `w` の長さを超えている
+rdata, _ := hex.DecodeString("0001" + "0000") // 4 バイト
+_, pos, err := dnsmsg.ParseRecordOPT(rdata, 0, 8)
+// err は `invalid OPT record RDATA size`
+// pos == 0
 ```
