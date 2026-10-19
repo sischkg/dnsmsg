@@ -33,7 +33,9 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
   - `Zone` 構造体（オリジン、デフォルト TTL、RRSet コレクション）
   - `AddRRSet` / `FindRRSet` / `RemoveRRSet` / `Equal` / `CanonicalWireFormat`
   - `ResourceRecordsToZone` で `[]ResourceRecord` を RRSet にグループ化して Zone を構築
-- UDP / TCP による DNS クエリ送信（`SendQuery`）
+- UDP / TCP による DNS クエリ送信（`SendQuery` / `SendQueryWithTimeout`）
+- `dq` コマンド（`cmd/dq`）: 指定したサーバへ問い合わせを送り、送信したメッセージと
+  受信したメッセージを JSON で表示（`docs/dq.md`）
 
 ## サポートするレコードタイプ
 
@@ -68,6 +70,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
 | [record-nsec3param.md](record-nsec3param.md) | NSEC3PARAM レコード（RFC 5155） |
 | [tsig.md](tsig.md) | TSIG による DNS メッセージの署名と検証（RFC 8945） |
+| [dq.md](dq.md) | `dq` コマンド（`cmd/dq`）: 問い合わせ送信と送信・受信メッセージの JSON 表示 |
 
 ## クイックスタート
 
@@ -171,3 +174,4 @@ for _, rr := range resp.AnswerSection {
 
 - [edns.md](edns.md) — EDNS(0) / OPT レコードと EDNS option の作成
 - [tsig.md](tsig.md) — TSIG による DNS メッセージの署名と検証（RFC 8945）
+- [dq.md](dq.md) — `dq` コマンドの使い方（問い合わせ送信、JSON 出力）
