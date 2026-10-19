@@ -4,6 +4,8 @@
 //   - Go 1.23 開発環境（gopls 含む）: .devcontainer/Dockerfile
 //   - git / curl / wget による外部 Web アクセス: .devcontainer/Dockerfile
 //   - OpenCode (V2) CLI: .devcontainer/Dockerfile
+//   - BIND 関連ツール（dig / named-checkzone / dnssec-keygen / dnssec-signzone）:
+//     .devcontainer/Dockerfile（bind9-dnsutils, bind9-utils）
 //   - OpenCode 設定を container 外（ホスト）から読み込む: 下の "mounts"
 {
   "name": "dnsmsg (Go + OpenCode)",
@@ -38,7 +40,7 @@
   "postCreateCommand": [
     "/bin/bash",
     "-lc",
-    "go version && git --version && (gopls version || /home/vscode/go/bin/gopls version) && opencode --version && curl -fsS https://example.com -o /dev/null && echo 'curl: OK' && wget -q -O /dev/null https://example.com && echo 'wget: OK' && echo '--- mounted opencode config ---' && ls -la /home/vscode/.config/opencode"
+    "go version && git --version && (gopls version || /home/vscode/go/bin/gopls version) && opencode --version && curl -fsS https://example.com -o /dev/null && echo 'curl: OK' && wget -q -O /dev/null https://example.com && echo 'wget: OK' && command -v dig named-checkzone dnssec-keygen dnssec-signzone && echo 'BIND tools: OK' && echo '--- mounted opencode config ---' && ls -la /home/vscode/.config/opencode"
   ],
 
   // VS Code の Go 開発拡張

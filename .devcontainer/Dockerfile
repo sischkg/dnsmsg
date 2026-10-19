@@ -1,10 +1,16 @@
-# devcontainer: Go 1.23 + git + OpenCode (V2) + gopls + curl/wget
+# devcontainer: Go 1.23 + git + OpenCode (V2) + gopls + curl/wget + BIND ツール
 FROM mcr.microsoft.com/devcontainers/go:1.23
 
 # ---------- root: システムパッケージ ----------
 USER root
 # ベースイメージに同梱の Yarn apt リポジトリは GPG キーが失効しており
 # `apt-get update` が失敗するため、不要なリポジトリ定義を削除する
+#
+# BIND 関連ツール（DNSSEC / ゾーン検証用）の提供関係（Debian bookworm, bind 9.18）:
+#   bind9-dnsutils : dig, delv, nslookup
+#   bind9-utils    : named-checkzone, named-checkconf, named-compilezone,
+#                    dnssec-keygen, dnssec-signzone, dnssec-settime など
+#   （named サーバ本体の bind9 は入れない。検証・変換ツールのみ必要）
 RUN rm -f /etc/apt/sources.list.d/yarn.list && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
@@ -13,6 +19,8 @@ RUN rm -f /etc/apt/sources.list.d/yarn.list && \
         ca-certificates \
         curl \
         wget \
+        bind9-dnsutils \
+        bind9-utils \
         && \
     rm -rf /var/lib/apt/lists/*
 
