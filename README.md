@@ -154,3 +154,7 @@ go vet ./...
   `CanonicalWireFormat` / `AppendWireFormat` / `AppendCanonicalWireFormat` /
   `NewRecord*` / `NewRecord*FromString` / `ParseRecord*`）→ `ParseResourceRecord` の
   `switch` への追加 → `record-<type>_test.go` のテーブル駆動テスト。
+
+## ライセンス
+
+MIT ライセンスです。詳細は [LICENSE](LICENSE) を参照してください。
