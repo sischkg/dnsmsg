@@ -48,6 +48,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | NS       | `TYPE_NS` (2)    | `RecordNS`     |
 | CNAME    | `TYPE_CNAME` (5) | `RecordCNAME`  |
 | SOA      | `TYPE_SOA` (6)   | `RecordSOA`    |
+| PTR      | `TYPE_PTR` (12)  | `RecordPTR`    |
 | MX       | `TYPE_MX` (15)   | `RecordMX`     |
 | TXT      | `TYPE_TXT` (16)  | `RecordTXT`    |
 | AAAA     | `TYPE_AAAA` (28) | `RecordAAAA`   |
@@ -70,6 +71,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [zone.md](zone.md) | DNS ゾーン管理（Zone 構造体、RRSet コレクション、ResourceRecordsToZone） |
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
 | [record-cname.md](record-cname.md) | CNAME レコード（RFC 1035） |
+| [record-ptr.md](record-ptr.md) | PTR レコード（RFC 1035） |
 | [record-dname.md](record-dname.md) | DNAME レコード（RFC 6672） |
 | [record-txt.md](record-txt.md) | TXT レコード（RFC 1035） |
 | [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |

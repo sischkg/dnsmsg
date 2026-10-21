@@ -54,6 +54,7 @@ const (
 	TYPE_NS     ResourceType = 2
 	TYPE_CNAME  ResourceType = 5
 	TYPE_SOA    ResourceType = 6
+	TYPE_PTR    ResourceType = 12
 	TYPE_MX     ResourceType = 15
 	TYPE_TXT    ResourceType = 16
 	TYPE_AAAA   ResourceType = 28
@@ -78,6 +79,8 @@ func (t ResourceType) String() string {
 		return "CNAME"
 	case TYPE_SOA:
 		return "SOA"
+	case TYPE_PTR:
+		return "PTR"
 	case TYPE_MX:
 		return "MX"
 	case TYPE_TXT:
@@ -123,6 +126,8 @@ func NewType(s string) (ResourceType, error) {
 		return TYPE_CNAME, nil
 	case "SOA":
 		return TYPE_SOA, nil
+	case "PTR":
+		return TYPE_PTR, nil
 	case "MX":
 		return TYPE_MX, nil
 	case "TXT":
@@ -398,6 +403,8 @@ func (rr *ResourceRecord) unmarshalRData(data json.RawMessage) error {
 		rdata = new(RecordCNAME)
 	case TYPE_MX:
 		rdata = new(RecordMX)
+	case TYPE_PTR:
+		rdata = new(RecordPTR)
 	case TYPE_TXT:
 		rdata = new(RecordTXT)
 	case TYPE_SOA:
@@ -525,6 +532,8 @@ func ParseResourceRecord(w WireFormat, begin uint32) (rr ResourceRecord, end uin
 		rr.RData, _, err = ParseRecordCNAME(w, p)
 	case TYPE_MX:
 		rr.RData, _, err = ParseRecordMX(w, p)
+	case TYPE_PTR:
+		rr.RData, _, err = ParseRecordPTR(w, p)
 	case TYPE_TXT:
 		rr.RData, _, err = ParseRecordTXT(w, p, end)
 	case TYPE_SOA:

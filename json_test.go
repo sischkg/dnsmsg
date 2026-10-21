@@ -66,6 +66,11 @@ func TestRecordMarshalJSON(t *testing.T) {
 			want:  `{"CNAME":"www.example.com."}`,
 		},
 		{
+			name:  "PTR record",
+			rdata: NewRecordPTR(testDomainName(t, "www.example.com")),
+			want:  `{"PTR":"www.example.com."}`,
+		},
+		{
 			name:  "SOA record",
 			rdata: NewRecordSOA(testDomainName(t, "a.root-sns.net"), testDomainName(t, "a.root-sns.net"), 20240817, 0, 0, 0, 0),
 			want:  `{"expire":0,"minimum":0,"mname":"a.root-sns.net.","refresh":0,"retry":0,"rname":"a.root-sns.net.","serial":20240817}`,
@@ -373,6 +378,11 @@ func TestRecordUnmarshalJSON(t *testing.T) {
 			want: NewRecordCNAME(testDomainName(t, "www.example.com")),
 		},
 		{
+			name: "PTR record",
+			json: `{"PTR":"www.example.com."}`,
+			want: NewRecordPTR(testDomainName(t, "www.example.com")),
+		},
+		{
 			name: "SOA record",
 			json: `{"expire":0,"minimum":0,"mname":"a.root-sns.net.","refresh":0,"retry":0,"rname":"a.root-sns.net.","serial":20240817}`,
 			want: NewRecordSOA(testDomainName(t, "a.root-sns.net"), testDomainName(t, "a.root-sns.net"), 20240817, 0, 0, 0, 0),
@@ -472,6 +482,11 @@ func TestRecordUnmarshalJSONErrors(t *testing.T) {
 			rdata: RecordCNAME{},
 		},
 		{
+			name:  "PTR record with a malformed domain name",
+			json:  `{"PTR":"a..b."}`,
+			rdata: RecordPTR{},
+		},
+		{
 			name:  "DNAME record with a malformed domain name",
 			json:  `{"DNAME":"a..b."}`,
 			rdata: RecordDNAME{},
@@ -527,6 +542,7 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 	aRecord := NewRecordA([4]byte{192, 134, 1, 21})
 	nsRecord := NewRecordNS(testDomainName(t, "ns1.example.com"))
 	cnameRecord := NewRecordCNAME(testDomainName(t, "www.example.com"))
+	ptrRecord := NewRecordPTR(testDomainName(t, "www.example.com"))
 	dnameRecord := NewRecordDNAME(testDomainName(t, "sub.example.com"))
 	txtRecord := NewRecordTXT([]byte("v=spf1 -all"))
 	rawRecord := RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}}
@@ -567,6 +583,17 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 				Type:  TYPE_CNAME,
 				TTL:   300,
 				RData: &cnameRecord,
+			},
+		},
+		{
+			name: "PTR record",
+			json: `{"Class":"IN","Name":"1.0.0.127.in-addr.arpa.","RData":{"PTR":"www.example.com."},"TTL":300,"Type":"PTR"}`,
+			want: ResourceRecord{
+				Name:  testDomainName(t, "1.0.0.127.in-addr.arpa"),
+				Class: CLASS_IN,
+				Type:  TYPE_PTR,
+				TTL:   300,
+				RData: &ptrRecord,
 			},
 		},
 		{
