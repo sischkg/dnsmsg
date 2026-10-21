@@ -76,6 +76,16 @@ func TestRecordMarshalJSON(t *testing.T) {
 			want:  `{"Exchange":"mail.example.com.","Preference":3600}`,
 		},
 		{
+			name:  "TXT record",
+			rdata: NewRecordTXT([]byte("v=spf1 -all")),
+			want:  `{"Strings":["dj1zcGYxIC1hbGw"]}`,
+		},
+		{
+			name:  "TXT record with several character-strings",
+			rdata: NewRecordTXT([]byte("hello world"), []byte{0x00, 0x01}),
+			want:  `{"Strings":["aGVsbG8gd29ybGQ","AAE"]}`,
+		},
+		{
 			name:  "AAAA record",
 			rdata: NewRecordAAAA([16]byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}),
 			want:  `{"address":"::1"}`,
@@ -373,6 +383,16 @@ func TestRecordUnmarshalJSON(t *testing.T) {
 			want: NewRecordMX(3600, testDomainName(t, "mail.example.com")),
 		},
 		{
+			name: "TXT record",
+			json: `{"Strings":["dj1zcGYxIC1hbGw"]}`,
+			want: NewRecordTXT([]byte("v=spf1 -all")),
+		},
+		{
+			name: "TXT record with several character-strings",
+			json: `{"Strings":["aGVsbG8gd29ybGQ","AAE"]}`,
+			want: NewRecordTXT([]byte("hello world"), []byte{0x00, 0x01}),
+		},
+		{
 			name: "DNAME record",
 			json: `{"DNAME":"sub.example.com."}`,
 			want: NewRecordDNAME(testDomainName(t, "sub.example.com")),
@@ -462,6 +482,11 @@ func TestRecordUnmarshalJSONErrors(t *testing.T) {
 			rdata: RecordDS{},
 		},
 		{
+			name:  "TXT record with a malformed character-string",
+			json:  `{"Strings":["!!!"]}`,
+			rdata: RecordTXT{},
+		},
+		{
 			name:  "raw record with malformed base64",
 			json:  `{"Data":"!!!"}`,
 			rdata: RecordRaw{},
@@ -503,6 +528,7 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 	nsRecord := NewRecordNS(testDomainName(t, "ns1.example.com"))
 	cnameRecord := NewRecordCNAME(testDomainName(t, "www.example.com"))
 	dnameRecord := NewRecordDNAME(testDomainName(t, "sub.example.com"))
+	txtRecord := NewRecordTXT([]byte("v=spf1 -all"))
 	rawRecord := RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}}
 
 	tests := []struct {
@@ -552,6 +578,17 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 				Type:  TYPE_DNAME,
 				TTL:   300,
 				RData: &dnameRecord,
+			},
+		},
+		{
+			name: "TXT record",
+			json: `{"Class":"IN","Name":"txt.example.com.","RData":{"Strings":["dj1zcGYxIC1hbGw="]},"TTL":300,"Type":"TXT"}`,
+			want: ResourceRecord{
+				Name:  testDomainName(t, "txt.example.com"),
+				Class: CLASS_IN,
+				Type:  TYPE_TXT,
+				TTL:   300,
+				RData: &txtRecord,
 			},
 		},
 		{

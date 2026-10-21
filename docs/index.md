@@ -49,6 +49,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | CNAME    | `TYPE_CNAME` (5) | `RecordCNAME`  |
 | SOA      | `TYPE_SOA` (6)   | `RecordSOA`    |
 | MX       | `TYPE_MX` (15)   | `RecordMX`     |
+| TXT      | `TYPE_TXT` (16)  | `RecordTXT`    |
 | AAAA     | `TYPE_AAAA` (28) | `RecordAAAA`   |
 | NSEC     | `TYPE_NSEC` (32) | `RecordNSEC`   |
 | DNAME    | `TYPE_DNAME` (39) | `RecordDNAME`  |
@@ -70,6 +71,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
 | [record-cname.md](record-cname.md) | CNAME レコード（RFC 1035） |
 | [record-dname.md](record-dname.md) | DNAME レコード（RFC 6672） |
+| [record-txt.md](record-txt.md) | TXT レコード（RFC 1035） |
 | [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
 | [record-nsec3param.md](record-nsec3param.md) | NSEC3PARAM レコード（RFC 5155） |

@@ -159,12 +159,12 @@ func TestParseWireFormat(t *testing.T) {
 		QDCOUNT: 1,
 		ANCOUNT: 1,
 		QuestionSection: []QuestionSectionEntry{
-			{QName: testDomainName(t, "raw.example."), Class: CLASS_IN, Type: ResourceType(16)},
+			{QName: testDomainName(t, "raw.example."), Class: CLASS_IN, Type: ResourceType(100)},
 		},
 		AnswerSection: []ResourceRecord{
 			{
-				Name: testDomainName(t, "raw.example."), Class: CLASS_IN, Type: ResourceType(16), TTL: 3600,
-				RData: NewRecordRaw(ResourceType(16), rawData),
+				Name: testDomainName(t, "raw.example."), Class: CLASS_IN, Type: ResourceType(100), TTL: 3600,
+				RData: NewRecordRaw(ResourceType(100), rawData),
 			},
 		},
 	}
@@ -322,7 +322,7 @@ func TestParseWireFormat(t *testing.T) {
 		},
 		{
 			name:    "unknown record type RDATA extends beyond message",
-			input:   craftedErrorWire(ResourceType(16), 10, 0xAB, 0xCD),
+			input:   craftedErrorWire(ResourceType(100), 10, 0xAB, 0xCD),
 			wantErr: true,
 		},
 		{

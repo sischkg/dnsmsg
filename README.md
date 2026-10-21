@@ -119,6 +119,7 @@ go build -o dq ./cmd/dq
 | CNAME | `TYPE_CNAME` (5) | `RecordCNAME` |
 | SOA | `TYPE_SOA` (6) | `RecordSOA` |
 | MX | `TYPE_MX` (15) | `RecordMX` |
+| TXT | `TYPE_TXT` (16) | `RecordTXT` |
 | AAAA | `TYPE_AAAA` (28) | `RecordAAAA` |
 | NSEC | `TYPE_NSEC` (32) | `RecordNSEC` |
 | DNAME | `TYPE_DNAME` (39) | `RecordDNAME` |
