@@ -51,6 +51,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | MX       | `TYPE_MX` (15)   | `RecordMX`     |
 | AAAA     | `TYPE_AAAA` (28) | `RecordAAAA`   |
 | NSEC     | `TYPE_NSEC` (32) | `RecordNSEC`   |
+| DNAME    | `TYPE_DNAME` (39) | `RecordDNAME`  |
 | NSEC3    | `TYPE_NSEC3` (50)| `RecordNSEC3`  |
 | NSEC3PARAM | `TYPE_NSEC3PARAM` (51)| `RecordNSEC3PARAM` |
 | OPT      | `TYPE_OPT` (41)  | `RecordOPT`（[edns.md](edns.md) 参照） |
@@ -68,6 +69,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [zone.md](zone.md) | DNS ゾーン管理（Zone 構造体、RRSet コレクション、ResourceRecordsToZone） |
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
 | [record-cname.md](record-cname.md) | CNAME レコード（RFC 1035） |
+| [record-dname.md](record-dname.md) | DNAME レコード（RFC 6672） |
 | [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
 | [record-nsec3param.md](record-nsec3param.md) | NSEC3PARAM レコード（RFC 5155） |

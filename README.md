@@ -121,6 +121,7 @@ go build -o dq ./cmd/dq
 | MX | `TYPE_MX` (15) | `RecordMX` |
 | AAAA | `TYPE_AAAA` (28) | `RecordAAAA` |
 | NSEC | `TYPE_NSEC` (32) | `RecordNSEC` |
+| DNAME | `TYPE_DNAME` (39) | `RecordDNAME` |
 | OPT | `TYPE_OPT` (41) | `RecordOPT` |
 | DS | `TYPE_DS` (43) | `RecordDS` |
 | RRSIG | `TYPE_RRSIG` (46) | `RecordRRSIG` |

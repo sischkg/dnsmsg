@@ -81,6 +81,11 @@ func TestRecordMarshalJSON(t *testing.T) {
 			want:  `{"address":"::1"}`,
 		},
 		{
+			name:  "DNAME record",
+			rdata: NewRecordDNAME(testDomainName(t, "sub.example.com")),
+			want:  `{"DNAME":"sub.example.com."}`,
+		},
+		{
 			name:  "DS record",
 			rdata: NewRecordDS(1000, 5, 1, []byte{0x00, 0x01}),
 			want:  `{"Algorithm":5,"Digest":"0001","DigestType":1,"KeyTag":1000}`,
@@ -368,6 +373,11 @@ func TestRecordUnmarshalJSON(t *testing.T) {
 			want: NewRecordMX(3600, testDomainName(t, "mail.example.com")),
 		},
 		{
+			name: "DNAME record",
+			json: `{"DNAME":"sub.example.com."}`,
+			want: NewRecordDNAME(testDomainName(t, "sub.example.com")),
+		},
+		{
 			name: "DS record",
 			json: `{"Algorithm":5,"Digest":"0001","DigestType":1,"KeyTag":1000}`,
 			want: NewRecordDS(1000, 5, 1, []byte{0x00, 0x01}),
@@ -442,6 +452,11 @@ func TestRecordUnmarshalJSONErrors(t *testing.T) {
 			rdata: RecordCNAME{},
 		},
 		{
+			name:  "DNAME record with a malformed domain name",
+			json:  `{"DNAME":"a..b."}`,
+			rdata: RecordDNAME{},
+		},
+		{
 			name:  "DS record with a malformed digest",
 			json:  `{"Algorithm":5,"Digest":"zz","DigestType":1,"KeyTag":1000}`,
 			rdata: RecordDS{},
@@ -487,6 +502,7 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 	aRecord := NewRecordA([4]byte{192, 134, 1, 21})
 	nsRecord := NewRecordNS(testDomainName(t, "ns1.example.com"))
 	cnameRecord := NewRecordCNAME(testDomainName(t, "www.example.com"))
+	dnameRecord := NewRecordDNAME(testDomainName(t, "sub.example.com"))
 	rawRecord := RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}}
 
 	tests := []struct {
@@ -525,6 +541,17 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 				Type:  TYPE_CNAME,
 				TTL:   300,
 				RData: &cnameRecord,
+			},
+		},
+		{
+			name: "DNAME record",
+			json: `{"Class":"IN","Name":"sub.example.com.","RData":{"DNAME":"sub.example.com."},"TTL":300,"Type":"DNAME"}`,
+			want: ResourceRecord{
+				Name:  testDomainName(t, "sub.example.com"),
+				Class: CLASS_IN,
+				Type:  TYPE_DNAME,
+				TTL:   300,
+				RData: &dnameRecord,
 			},
 		},
 		{
