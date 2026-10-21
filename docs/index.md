@@ -46,6 +46,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 |----------|------------------|----------------|
 | A        | `TYPE_A` (1)     | `RecordA`      |
 | NS       | `TYPE_NS` (2)    | `RecordNS`     |
+| CNAME    | `TYPE_CNAME` (5) | `RecordCNAME`  |
 | SOA      | `TYPE_SOA` (6)   | `RecordSOA`    |
 | MX       | `TYPE_MX` (15)   | `RecordMX`     |
 | AAAA     | `TYPE_AAAA` (28) | `RecordAAAA`   |
@@ -66,6 +67,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [rrset.md](rrset.md) | RRSet と DNSSEC 署名（正規ワイヤフォーマット、SignRRSet、SupportedDNSSECAlgorithms） |
 | [zone.md](zone.md) | DNS ゾーン管理（Zone 構造体、RRSet コレクション、ResourceRecordsToZone） |
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
+| [record-cname.md](record-cname.md) | CNAME レコード（RFC 1035） |
 | [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
 | [record-nsec3param.md](record-nsec3param.md) | NSEC3PARAM レコード（RFC 5155） |

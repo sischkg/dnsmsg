@@ -61,6 +61,11 @@ func TestRecordMarshalJSON(t *testing.T) {
 			want:  `{"nsname":"ns1.example.com."}`,
 		},
 		{
+			name:  "CNAME record",
+			rdata: NewRecordCNAME(testDomainName(t, "www.example.com")),
+			want:  `{"CNAME":"www.example.com."}`,
+		},
+		{
 			name:  "SOA record",
 			rdata: NewRecordSOA(testDomainName(t, "a.root-sns.net"), testDomainName(t, "a.root-sns.net"), 20240817, 0, 0, 0, 0),
 			want:  `{"expire":0,"minimum":0,"mname":"a.root-sns.net.","refresh":0,"retry":0,"rname":"a.root-sns.net.","serial":20240817}`,
@@ -348,6 +353,11 @@ func TestRecordUnmarshalJSON(t *testing.T) {
 			want: NewRecordNS(testDomainName(t, "ns1.example.com")),
 		},
 		{
+			name: "CNAME record",
+			json: `{"CNAME":"www.example.com."}`,
+			want: NewRecordCNAME(testDomainName(t, "www.example.com")),
+		},
+		{
 			name: "SOA record",
 			json: `{"expire":0,"minimum":0,"mname":"a.root-sns.net.","refresh":0,"retry":0,"rname":"a.root-sns.net.","serial":20240817}`,
 			want: NewRecordSOA(testDomainName(t, "a.root-sns.net"), testDomainName(t, "a.root-sns.net"), 20240817, 0, 0, 0, 0),
@@ -427,6 +437,11 @@ func TestRecordUnmarshalJSONErrors(t *testing.T) {
 			rdata: RecordNS{},
 		},
 		{
+			name:  "CNAME record with a malformed domain name",
+			json:  `{"CNAME":"a..b."}`,
+			rdata: RecordCNAME{},
+		},
+		{
 			name:  "DS record with a malformed digest",
 			json:  `{"Algorithm":5,"Digest":"zz","DigestType":1,"KeyTag":1000}`,
 			rdata: RecordDS{},
@@ -471,6 +486,7 @@ func TestRecordUnmarshalJSONErrors(t *testing.T) {
 func TestResourceRecordUnmarshalJSON(t *testing.T) {
 	aRecord := NewRecordA([4]byte{192, 134, 1, 21})
 	nsRecord := NewRecordNS(testDomainName(t, "ns1.example.com"))
+	cnameRecord := NewRecordCNAME(testDomainName(t, "www.example.com"))
 	rawRecord := RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}}
 
 	tests := []struct {
@@ -498,6 +514,17 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 				Type:  TYPE_NS,
 				TTL:   300,
 				RData: &nsRecord,
+			},
+		},
+		{
+			name: "CNAME record",
+			json: `{"Class":"IN","Name":"example.com.","RData":{"CNAME":"www.example.com."},"TTL":300,"Type":"CNAME"}`,
+			want: ResourceRecord{
+				Name:  testDomainName(t, "example.com"),
+				Class: CLASS_IN,
+				Type:  TYPE_CNAME,
+				TTL:   300,
+				RData: &cnameRecord,
 			},
 		},
 		{

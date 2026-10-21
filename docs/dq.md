@@ -72,7 +72,7 @@ usage: dq [options] <domain-name>
 `-c` と `-t` は `dnsmsg` が名前を知っている値と、10 進の数値を受け付けます。
 
 - クラス: `IN` / `CH` / `HS` / `ANY` または数値（`-c 3` は CH）
-- タイプ: `A` / `NS` / `SOA` / `MX` / `AAAA` / `OPT` / `DS` / `RRSIG` /
+- タイプ: `A` / `NS` / `CNAME` / `SOA` / `MX` / `AAAA` / `OPT` / `DS` / `RRSIG` /
   `DNSKEY` / `TSIG` / `NSEC` / `NSEC3` / `NSEC3PARAM`、`TYPE<n>` または数値
   （`-t 255` は TYPE255）
 

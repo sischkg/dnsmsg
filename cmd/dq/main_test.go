@@ -560,6 +560,7 @@ func TestParseQType(t *testing.T) {
 		{in: "A", want: dnsmsg.TYPE_A},
 		{in: "AAAA", want: dnsmsg.TYPE_AAAA},
 		{in: "NS", want: dnsmsg.TYPE_NS},
+		{in: "CNAME", want: dnsmsg.TYPE_CNAME},
 		{in: "SOA", want: dnsmsg.TYPE_SOA},
 		{in: "DNSKEY", want: dnsmsg.TYPE_DNSKEY},
 		{in: "TYPE99", want: dnsmsg.ResourceType(99)},
