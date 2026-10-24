@@ -20,7 +20,7 @@ func TestParseRecordNSEC(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:  "valid NSEC record with A and NS",
+			name: "valid NSEC record with A and NS",
 			input: append(
 				exampleOrg,
 				0x00, // type bitmap window 0
@@ -36,7 +36,7 @@ func TestParseRecordNSEC(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:  "valid NSEC record spanning two type bitmap windows",
+			name: "valid NSEC record spanning two type bitmap windows",
 			input: append(
 				exampleOrg,
 				// window 0: type A (offset 1) -> length 1, bitmap 0x40
@@ -65,9 +65,9 @@ func TestParseRecordNSEC(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:  "valid NSEC record with root next domain name",
+			name: "valid NSEC record with root next domain name",
 			input: append(
-				[]byte{0x00}, // root domain name
+				[]byte{0x00},     // root domain name
 				0x00, 0x01, 0x40, // type bitmap: type A
 			),
 			begin: 0,
@@ -89,7 +89,7 @@ func TestParseRecordNSEC(t *testing.T) {
 			name:    "truncated input - missing type bitmap window header",
 			input:   append(exampleOrg, 0x00),
 			begin:   0,
-			end:   uint32(len(exampleOrg) + 1),
+			end:     uint32(len(exampleOrg) + 1),
 			want:    RecordNSEC{},
 			wantErr: true,
 		},
@@ -97,7 +97,7 @@ func TestParseRecordNSEC(t *testing.T) {
 			name:    "invalid type bitmap length zero",
 			input:   append(exampleOrg, 0x00, 0x00),
 			begin:   0,
-			end:   uint32(len(exampleOrg) + 2),
+			end:     uint32(len(exampleOrg) + 2),
 			want:    RecordNSEC{},
 			wantErr: true,
 		},
@@ -105,7 +105,7 @@ func TestParseRecordNSEC(t *testing.T) {
 			name:    "invalid type bitmap length over 32",
 			input:   append(exampleOrg, 0x00, 0x21),
 			begin:   0,
-			end:   uint32(len(exampleOrg) + 2),
+			end:     uint32(len(exampleOrg) + 2),
 			want:    RecordNSEC{},
 			wantErr: true,
 		},
@@ -113,7 +113,7 @@ func TestParseRecordNSEC(t *testing.T) {
 			name:    "type bitmap extends beyond record",
 			input:   append(exampleOrg, 0x00, 0x02, 0x60),
 			begin:   0,
-			end:   uint32(len(exampleOrg) + 2),
+			end:     uint32(len(exampleOrg) + 2),
 			want:    RecordNSEC{},
 			wantErr: true,
 		},

@@ -11,12 +11,12 @@ func TestParseRecordNSEC3(t *testing.T) {
 	// Hash Alg = 1 (SHA-1), Flags = 0, Iterations = 10, Salt Length = 2
 	// Hash Length = 3, Type Bitmap: window 0, length 1, bitmap 0x60 (A + NS)
 	base := []byte{
-		0x01, // hash algorithm: SHA-1
-		0x00, // flags
+		0x01,       // hash algorithm: SHA-1
+		0x00,       // flags
 		0x00, 0x0a, // iterations: 10
-		0x02, // salt length: 2
+		0x02,       // salt length: 2
 		0x11, 0x22, // salt
-		0x03, // hash length: 3
+		0x03,                   // hash length: 3
 		0x03, 0x33, 0x44, 0x55, // next hashed name: label length 3 + 3 bytes
 		0x00, 0x01, 0x60, // type bitmap: window 0, length 1, A + NS
 	}
@@ -46,11 +46,11 @@ func TestParseRecordNSEC3(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:  "valid NSEC3 record with opt-out flag",
+			name: "valid NSEC3 record with opt-out flag",
 			input: append(
 				[]byte{0x01, 0x01, 0x00, 0x05}, // hash alg SHA-1, flag opt-out, iterations 5
-				0x00, // salt length 0
-				0x00, // hash length 0
+				0x00,                           // salt length 0
+				0x00,                           // hash length 0
 				// next hashed name: label length 0 + 0 bytes
 				0x00,
 				// no type bit maps
@@ -68,12 +68,12 @@ func TestParseRecordNSEC3(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:  "valid NSEC3 record with salt and iterations",
+			name: "valid NSEC3 record with salt and iterations",
 			input: append(
 				[]byte{0x01, 0x00, 0x00, 0x64}, // hash alg SHA-1, flags 0, iterations 100
-				0x04, // salt length 4
-				0xaa, 0xbb, 0xcc, 0xdd, // salt
-				0x02, // hash length 2
+				0x04,                           // salt length 4
+				0xaa, 0xbb, 0xcc, 0xdd,         // salt
+				0x02,             // hash length 2
 				0x02, 0x12, 0x34, // next hashed name: label length 2 + 2 bytes
 				0x00, 0x01, 0x40, // type bitmap: window 0, length 1, type A
 			),
@@ -121,7 +121,7 @@ func TestParseRecordNSEC3(t *testing.T) {
 			name:    "salt extends beyond record",
 			input:   []byte{0x01, 0x00, 0x00, 0x0a, 0x03, 0xaa, 0xbb},
 			begin:   0,
-			end:   7,
+			end:     7,
 			want:    RecordNSEC3{},
 			wantErr: true,
 		},
@@ -136,7 +136,7 @@ func TestParseRecordNSEC3(t *testing.T) {
 			name:    "next hashed name extends beyond record",
 			input:   []byte{0x01, 0x00, 0x00, 0x0a, 0x00, 0x03, 0x03, 0x12},
 			begin:   0,
-			end:   9,
+			end:     9,
 			want:    RecordNSEC3{},
 			wantErr: true,
 		},
@@ -311,12 +311,12 @@ func TestRecordNSEC3CanonicalWireFormat(t *testing.T) {
 		[]ResourceType{TYPE_A, TYPE_NS},
 	)
 	want := []byte{
-		0x01, // hash algorithm
-		0x00, // flags
+		0x01,       // hash algorithm
+		0x00,       // flags
 		0x00, 0x0a, // iterations: 10
-		0x02, // salt length
+		0x02,       // salt length
 		0x11, 0x22, // salt
-		0x03, // hash length
+		0x03,                   // hash length
 		0x03, 0x33, 0x44, 0x55, // label length 3 + 3 bytes
 		0x00, 0x01, 0x60, // type bitmap: window 0, length 1, A + NS
 	}

@@ -13,16 +13,16 @@ func TestParseRecordA(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:  "valid A record",
-			input: []byte{192, 168, 1, 1},
-			begin: 0,
-			want:  NewRecordA([4]byte{192, 168, 1, 1}),
+			name:    "valid A record",
+			input:   []byte{192, 168, 1, 1},
+			begin:   0,
+			want:    NewRecordA([4]byte{192, 168, 1, 1}),
 			wantErr: false,
 		},
 		{
-			name:  "truncated A record",
-			input: []byte{192, 168, 1},
-			begin: 0,
+			name:    "truncated A record",
+			input:   []byte{192, 168, 1},
+			begin:   0,
 			want:    RecordA{},
 			wantErr: true,
 		},

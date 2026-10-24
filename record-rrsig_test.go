@@ -51,7 +51,7 @@ func TestParseRecordRRSIG(t *testing.T) {
 				sig := []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}
 				return buildRRSIGWire(t, 2, 8, 2, 7200, 1710000000, 1700000000, 512, signersName, sig)
 			}(),
-			begin:   0,
+			begin: 0,
 			want: NewRecordRRSIG(2, 8, 2, 7200, 1710000000, 1700000000, 512, signersName,
 				[]byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10}),
 			wantPos: 51, // 18 + 17 + 16
@@ -64,7 +64,7 @@ func TestParseRecordRRSIG(t *testing.T) {
 				sig := []byte{0xDE, 0xAD, 0xBE, 0xEF}
 				return buildRRSIGWire(t, 6, 5, 1, 600, 1700000000, 1690000000, 256, root, sig)
 			}(),
-			begin:   0,
+			begin: 0,
 			// Wire-format parsing represents the root domain as a single
 			// root label.
 			want:    NewRecordRRSIG(6, 5, 1, 600, 1700000000, 1690000000, 256, NewRootDomainName(), []byte{0xDE, 0xAD, 0xBE, 0xEF}),
@@ -114,7 +114,7 @@ func TestParseRecordRRSIG(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name:  "signature bounded by RDLENGTH, trailing data ignored",
+			name: "signature bounded by RDLENGTH, trailing data ignored",
 			input: func() []byte {
 				b := buildRRSIGWire(t, 1, 5, 3, 3600, 1700000000, 1690000000, 12345, signersName, signature)
 				return append(b, 0x99, 0x88, 0x77) // trailing bytes that must not be absorbed

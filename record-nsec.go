@@ -11,11 +11,12 @@ import (
 // RecordNSEC represents an NSEC (Next Secure) record per RFC 4034 Section 5.2.
 //
 // NSEC RDATA wire format:
-//   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//   /                     Next Domain Name /                                \
-//   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//   /                     Type Bit Maps /                                     \
-//   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	/                     Next Domain Name /                                \
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	/                     Type Bit Maps /                                     \
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //
 // The Next Domain Name is the owner name of the next NSEC record in
 // canonical order. The Type Bit Maps identify the set of RR types present
@@ -216,7 +217,7 @@ func appendTypeBitMaps(w *WireFormat, types []ResourceType) uint32 {
 		// The bitmap length covers the highest present type, rounded up to a
 		// whole octet.  At least one octet is required.
 		maxOffset := offsets[len(offsets)-1]
-		length := (maxOffset+1+7) / 8
+		length := (maxOffset + 1 + 7) / 8
 		if length > 32 {
 			length = 32
 		}

@@ -22,11 +22,12 @@ const (
 // RecordNSEC3 represents an NSEC3 (NSEC version 3) record per RFC 5155 Section 3.2.
 //
 // NSEC3 RDATA wire format:
-//   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//   | Hash Alg. |   Flags   |     Iterations      |  Salt Length  |  Salt   /
-//   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//   /      Hash Length    /   Next Hashed Owner Name  /    Type Bit Maps    /
-//   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	| Hash Alg. |   Flags   |     Iterations      |  Salt Length  |  Salt   /
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	/      Hash Length    /   Next Hashed Owner Name  /    Type Bit Maps    /
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //
 // The Next Hashed Owner Name is encoded as a length-prefixed label: the
 // first octet is the label length (which must equal Hash Length), followed
@@ -108,11 +109,11 @@ func (r RecordNSEC3) MarshalJSON() ([]byte, error) {
 // and each type from a resource type name or a numeric code.
 func (r *RecordNSEC3) UnmarshalJSON(data []byte) error {
 	var fields struct {
-		HashAlgorithm  uint8      `json:"HashAlgorithm"`
-		Flags          uint8      `json:"Flags"`
-		Iterations     uint16     `json:"Iterations"`
-		Salt           string     `json:"Salt"`
-		NextHashedName string     `json:"NextHashedName"`
+		HashAlgorithm  uint8           `json:"HashAlgorithm"`
+		Flags          uint8           `json:"Flags"`
+		Iterations     uint16          `json:"Iterations"`
+		Salt           string          `json:"Salt"`
+		NextHashedName string          `json:"NextHashedName"`
 		Types          json.RawMessage `json:"Types"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {

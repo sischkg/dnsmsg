@@ -9,10 +9,10 @@ import (
 func TestParseRecordNSEC3PARAM(t *testing.T) {
 	// Salt = 0x1122, Type Bitmap: window 0, length 1, bitmap 0x60 (A + NS)
 	base := []byte{
-		0x01, // hash algorithm: SHA-1
-		0x00, // flags
+		0x01,       // hash algorithm: SHA-1
+		0x00,       // flags
 		0x00, 0x0a, // iterations: 10
-		0x02, // salt length: 2
+		0x02,       // salt length: 2
 		0x11, 0x22, // salt
 		0x00, 0x01, 0x60, // type bitmap: window 0, length 1, A + NS
 	}
@@ -41,10 +41,10 @@ func TestParseRecordNSEC3PARAM(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:  "valid NSEC3PARAM record with opt-out flag",
+			name: "valid NSEC3PARAM record with opt-out flag",
 			input: append(
 				[]byte{0x01, 0x01, 0x00, 0x05}, // hash alg SHA-1, flag opt-out, iterations 5
-				0x00, // salt length 0
+				0x00,                           // salt length 0
 				// no type bit maps
 			),
 			begin: 0,
@@ -59,11 +59,11 @@ func TestParseRecordNSEC3PARAM(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:  "valid NSEC3PARAM record with salt and iterations",
+			name: "valid NSEC3PARAM record with salt and iterations",
 			input: append(
 				[]byte{0x01, 0x00, 0x00, 0x64}, // hash alg SHA-1, flags 0, iterations 100
-				0x04, // salt length 4
-				0xaa, 0xbb, 0xcc, 0xdd, // salt
+				0x04,                           // salt length 4
+				0xaa, 0xbb, 0xcc, 0xdd,         // salt
 				0x00, 0x01, 0x40, // type bitmap: window 0, length 1, type A
 			),
 			begin: 0,
@@ -109,7 +109,7 @@ func TestParseRecordNSEC3PARAM(t *testing.T) {
 			name:    "salt extends beyond record",
 			input:   []byte{0x01, 0x00, 0x00, 0x0a, 0x03, 0xaa, 0xbb},
 			begin:   0,
-			end:   7,
+			end:     7,
 			want:    RecordNSEC3PARAM{},
 			wantErr: true,
 		},
@@ -279,10 +279,10 @@ func TestRecordNSEC3PARAMCanonicalWireFormat(t *testing.T) {
 		[]ResourceType{TYPE_A, TYPE_NS},
 	)
 	want := []byte{
-		0x01, // hash algorithm
-		0x00, // flags
+		0x01,       // hash algorithm
+		0x00,       // flags
 		0x00, 0x0a, // iterations: 10
-		0x02, // salt length
+		0x02,       // salt length
 		0x11, 0x22, // salt
 		0x00, 0x01, 0x60, // type bitmap: window 0, length 1, A + NS
 	}

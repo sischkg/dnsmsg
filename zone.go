@@ -23,9 +23,9 @@ type Zone struct {
 // NewZone は新しい Zone を構築します。
 func NewZone(origin DomainName, defaultTTL uint32) Zone {
 	return Zone{
-		Origin:      origin,
-		DefaultTTL:  defaultTTL,
-		RRsets:      nil,
+		Origin:     origin,
+		DefaultTTL: defaultTTL,
+		RRsets:     nil,
 	}
 }
 
@@ -136,7 +136,7 @@ func ResourceRecordsToZone(origin DomainName, defaultTTL uint32, records []Resou
 	z := NewZone(origin, defaultTTL)
 
 	type groupKey struct {
-		name string
+		name  string
 		class ResourceClass
 		typ   ResourceType
 	}
@@ -146,9 +146,9 @@ func ResourceRecordsToZone(origin DomainName, defaultTTL uint32, records []Resou
 
 	for _, rr := range records {
 		key := groupKey{
-			name: rr.Name.String(),
+			name:  rr.Name.String(),
 			class: rr.Class,
-			typ:  rr.Type,
+			typ:   rr.Type,
 		}
 		if _, ok := groups[key]; !ok {
 			order = append(order, key)
@@ -327,8 +327,8 @@ func (z Zone) DefaultTTLClass() ResourceClass {
 // nsec3Hash は RFC 5155 Section 5 に従ってドメイン名の NSEC3 ハッシュを
 // 計算する。
 //
-//   H(0) = SHA-1(canonical_name || salt)
-//   H(i) = SHA-1(H(i-1) || salt) for i = 1 to iterations-1
+//	H(0) = SHA-1(canonical_name || salt)
+//	H(i) = SHA-1(H(i-1) || salt) for i = 1 to iterations-1
 //
 // canonical_name は小文字・圧縮なしのワイヤフォーマット（DomainName.
 // CanonicalWireFormat）を使用する。
@@ -428,10 +428,10 @@ func (z Zone) SignNSEC3(signer crypto.Signer, algorithm uint8, keyTag uint16, si
 
 	// 各オーナー名を NSEC3 ハッシュし、ハッシュ値でソート
 	type hashedEntry struct {
-		name     DomainName
-		nameKey  string
-		hash     []byte
-		types    []ResourceType
+		name    DomainName
+		nameKey string
+		hash    []byte
+		types   []ResourceType
 	}
 	hashed := make([]hashedEntry, 0, len(names))
 	for _, name := range names {

@@ -50,26 +50,26 @@ const (
 type ResourceType uint16
 
 const (
-	TYPE_A      ResourceType = 1
-	TYPE_NS     ResourceType = 2
-	TYPE_CNAME  ResourceType = 5
-	TYPE_SOA    ResourceType = 6
-	TYPE_PTR    ResourceType = 12
-	TYPE_MX     ResourceType = 15
-	TYPE_TXT    ResourceType = 16
-	TYPE_AAAA   ResourceType = 28
-	TYPE_DNAME  ResourceType = 39
-	TYPE_DS     ResourceType = 43
-	TYPE_OPT    ResourceType = 41
-	TYPE_RRSIG  ResourceType = 46
-	TYPE_DNSKEY ResourceType = 48
-	TYPE_SVCB   ResourceType = 64
-	TYPE_HTTPS  ResourceType = 65
-	TYPE_TKEY   ResourceType = 249
-	TYPE_TSIG   ResourceType = 250
-	TYPE_NSEC         ResourceType = 32
-	TYPE_NSEC3        ResourceType = 50
-	TYPE_NSEC3PARAM   ResourceType = 51
+	TYPE_A          ResourceType = 1
+	TYPE_NS         ResourceType = 2
+	TYPE_CNAME      ResourceType = 5
+	TYPE_SOA        ResourceType = 6
+	TYPE_PTR        ResourceType = 12
+	TYPE_MX         ResourceType = 15
+	TYPE_TXT        ResourceType = 16
+	TYPE_AAAA       ResourceType = 28
+	TYPE_DNAME      ResourceType = 39
+	TYPE_DS         ResourceType = 43
+	TYPE_OPT        ResourceType = 41
+	TYPE_RRSIG      ResourceType = 46
+	TYPE_DNSKEY     ResourceType = 48
+	TYPE_SVCB       ResourceType = 64
+	TYPE_HTTPS      ResourceType = 65
+	TYPE_TKEY       ResourceType = 249
+	TYPE_TSIG       ResourceType = 250
+	TYPE_NSEC       ResourceType = 32
+	TYPE_NSEC3      ResourceType = 50
+	TYPE_NSEC3PARAM ResourceType = 51
 )
 
 func (t ResourceType) String() string {

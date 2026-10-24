@@ -12,9 +12,10 @@ import (
 // RecordNSEC3PARAM represents an NSEC3PARAM record per RFC 5155 Section 6.
 //
 // NSEC3PARAM RDATA wire format:
-//   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-//   | Hash Alg. |   Flags   |     Iterations      |  Salt Length  |  Salt   |
-//   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+//	| Hash Alg. |   Flags   |     Iterations      |  Salt Length  |  Salt   |
+//	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 //
 // NSEC3PARAM is used in NSEC3-signed zones to indicate the parameters used
 // for hashing owner names. It does not contain a Next Hashed Owner Name
@@ -87,10 +88,10 @@ func (r RecordNSEC3PARAM) MarshalJSON() ([]byte, error) {
 // resource type name or a numeric code.
 func (r *RecordNSEC3PARAM) UnmarshalJSON(data []byte) error {
 	var fields struct {
-		HashAlgorithm uint8      `json:"HashAlgorithm"`
-		Flags         uint8      `json:"Flags"`
-		Iterations    uint16     `json:"Iterations"`
-		Salt          string     `json:"Salt"`
+		HashAlgorithm uint8           `json:"HashAlgorithm"`
+		Flags         uint8           `json:"Flags"`
+		Iterations    uint16          `json:"Iterations"`
+		Salt          string          `json:"Salt"`
 		Types         json.RawMessage `json:"Types"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {

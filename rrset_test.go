@@ -200,10 +200,10 @@ func TestLabelCount(t *testing.T) {
 
 func TestDNSSECAlgorithmHash(t *testing.T) {
 	tests := []struct {
-		name    string
-		alg     uint8
-		want    crypto.Hash
-		wantOK  bool
+		name   string
+		alg    uint8
+		want   crypto.Hash
+		wantOK bool
 	}{
 		{"RSASHA1", 5, crypto.SHA1, true},
 		{"RSASHA256", 8, crypto.SHA256, true},
