@@ -102,6 +102,7 @@ go build -o dq ./cmd/dq
 - RFC 4034 スタイルの正規形 wire format（圧縮なし・小文字）
 - EDNS(0) / OPT（RFC 6891）と EDNS option（DO・NSID・EDE・生データ・カスタムパーサ登録）
 - TSIG によるメッセージ認証（RFC 8945、HMAC-MD5 / SHA1 / SHA224 / SHA256 / SHA384 / SHA512）
+- TKEY によるセッション鍵の negotiate（RFC 2930、モードとエラーコードの読み書き）
 - DNSSEC: RRSet の正規ワイヤフォーマット、`SignRRSet` による署名、`VerifyRRSet` による検証、
   NSEC / NSEC3 によるゾーン署名、BIND `dnssec-keygen` の鍵ファイル読み込み
 - DNS ゾーン管理（`Zone`、`ResourceRecordsToZone`、`Zone.Sign` / `Zone.SignNSEC3`）
@@ -130,6 +131,7 @@ go build -o dq ./cmd/dq
 | DNSKEY | `TYPE_DNSKEY` (48) | `RecordDNSKEY` |
 | NSEC3 | `TYPE_NSEC3` (50) | `RecordNSEC3` |
 | NSEC3PARAM | `TYPE_NSEC3PARAM` (51) | `RecordNSEC3PARAM` |
+| TKEY | `TYPE_TKEY` (249) | `RecordTKEY` |
 | TSIG | `TYPE_TSIG` (250) | `RecordTSIG` |
 
 ## ドキュメント

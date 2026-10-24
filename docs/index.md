@@ -60,6 +60,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | DS       | `TYPE_DS` (43)   | `RecordDS`     |
 | RRSIG    | `TYPE_RRSIG` (46)| `RecordRRSIG`  |
 | DNSKEY   | `TYPE_DNSKEY` (48)| `RecordDNSKEY` |
+| TKEY     | `TYPE_TKEY` (249)| `RecordTKEY`   |
 
 ## ドキュメント目次
 
@@ -77,6 +78,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
 | [record-nsec3param.md](record-nsec3param.md) | NSEC3PARAM レコード（RFC 5155） |
+| [record-tkey.md](record-tkey.md) | TKEY レコード（RFC 2930） |
 | [tsig.md](tsig.md) | TSIG による DNS メッセージの署名と検証（RFC 8945） |
 | [dq.md](dq.md) | `dq` コマンド（`cmd/dq`）: 問い合わせ送信と送信・受信メッセージの JSON / base64 表示 |
 

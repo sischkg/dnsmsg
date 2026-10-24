@@ -121,6 +121,11 @@ func TestRecordMarshalJSON(t *testing.T) {
 			want:  `{"Algorithm":1,"Flags":256,"Protocol":3,"PublicKey":"AQI"}`,
 		},
 		{
+			name:  "TKEY record",
+			rdata: RecordTKEY{Algorithm: testDomainName(t, "gss-api."), Inception: 1700000000, Expiration: 1700001280, Mode: TKEYModeGSSAPI, Error: TKEYErrorBadAlg, KeyData: []byte{0xAA, 0xBB, 0xCC, 0xDD}, OtherData: []byte{0xDE, 0xAD, 0xBE}},
+			want:  `{"Algorithm":"gss-api.","Error":"BADALG","Expiration":1700001280,"Inception":1700000000,"KeyData":"qrvM3Q","Mode":"GSS-API","OtherData":"3q2+"}`,
+		},
+		{
 			name:  "unknown type record",
 			rdata: RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}},
 			want:  `{"Data":"ZmY","rtype":"TYPE100"}`,
@@ -411,6 +416,16 @@ func TestRecordUnmarshalJSON(t *testing.T) {
 			name: "DS record",
 			json: `{"Algorithm":5,"Digest":"0001","DigestType":1,"KeyTag":1000}`,
 			want: NewRecordDS(1000, 5, 1, []byte{0x00, 0x01}),
+		},
+		{
+			name: "TKEY record",
+			json: `{"Algorithm":"gss-api.","Error":21,"Expiration":1700001280,"Inception":1700000000,"KeyData":"qrvM3Q","Mode":"GSS-API","OtherData":"3q2+"}`,
+			want: RecordTKEY{Algorithm: testDomainName(t, "gss-api."), Inception: 1700000000, Expiration: 1700001280, Mode: TKEYModeGSSAPI, Error: TKEYErrorBadAlg, KeyData: []byte{0xAA, 0xBB, 0xCC, 0xDD}, OtherData: []byte{0xDE, 0xAD, 0xBE}},
+		},
+		{
+			name: "TKEY record with numbers and absent optional fields",
+			json: `{"Algorithm":".","Inception":1,"Expiration":2,"KeyData":"AA"}`,
+			want: RecordTKEY{Algorithm: testDomainName(t, "."), Inception: 1, Expiration: 2, Mode: TKEYModeReserved, Error: TKEYErrorNoError, KeyData: []byte{0x00}, OtherData: []byte{}},
 		},
 		{
 			name: "RRSIG record",
