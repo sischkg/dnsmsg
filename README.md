@@ -101,6 +101,7 @@ go build -o dq ./cmd/dq
 - ドメイン名（`DomainName` / `Label`）と RFC 1035 の名前圧縮（`NameCompressionDB`）
 - RFC 4034 スタイルの正規形 wire format（圧縮なし・小文字）
 - EDNS(0) / OPT（RFC 6891）と EDNS option（DO・NSID・EDE・生データ・カスタムパーサ登録）
+- SVCB / HTTPS のサービス参数（RFC 9460、SvcPriority・TargetName・SvcParams と zone file 表現）
 - TSIG によるメッセージ認証（RFC 8945、HMAC-MD5 / SHA1 / SHA224 / SHA256 / SHA384 / SHA512）
 - TKEY によるセッション鍵の negotiate（RFC 2930、モードとエラーコードの読み書き）
 - DNSSEC: RRSet の正規ワイヤフォーマット、`SignRRSet` による署名、`VerifyRRSet` による検証、
@@ -131,6 +132,8 @@ go build -o dq ./cmd/dq
 | DNSKEY | `TYPE_DNSKEY` (48) | `RecordDNSKEY` |
 | NSEC3 | `TYPE_NSEC3` (50) | `RecordNSEC3` |
 | NSEC3PARAM | `TYPE_NSEC3PARAM` (51) | `RecordNSEC3PARAM` |
+| SVCB | `TYPE_SVCB` (64) | `RecordSVCB` |
+| HTTPS | `TYPE_HTTPS` (65) | `RecordHTTPS` |
 | TKEY | `TYPE_TKEY` (249) | `RecordTKEY` |
 | TSIG | `TYPE_TSIG` (250) | `RecordTSIG` |
 

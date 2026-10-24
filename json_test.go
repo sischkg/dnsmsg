@@ -3,6 +3,7 @@ package dnsmsg
 import (
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -126,6 +127,40 @@ func TestRecordMarshalJSON(t *testing.T) {
 			want:  `{"Algorithm":"gss-api.","Error":"BADALG","Expiration":1700001280,"Inception":1700000000,"KeyData":"qrvM3Q","Mode":"GSS-API","OtherData":"3q2+"}`,
 		},
 		{
+			name: "SVCB record",
+			rdata: RecordSVCB{
+				SvcPriority: 1,
+				TargetName:  testDomainName(t, "svcb.example.com."),
+				SvcParams: []SvcParam{
+					{Key: KeyAlpn, Value: []byte{0x02, 'h', '2', 0x02, 'h', '3'}},
+					{Key: KeyPort, Value: []byte{0x20, 0xFB}},
+				},
+			},
+			want: `{"SvcParams":[{"Key":"alpn","Raw":"AmgyAmgz","Value":"h2,h3"},{"Key":"port","Raw":"IPs","Value":"8443"}],"SvcPriority":1,"TargetName":"svcb.example.com."}`,
+		},
+		{
+			// The SvcParams of an AliasMode record are empty, which is why
+			// the record has no SvcParams in memory either.
+			name: "AliasMode HTTPS record",
+			rdata: RecordHTTPS{RecordSVCB: RecordSVCB{
+				SvcPriority: 0,
+				TargetName:  testDomainName(t, "alias.example.com."),
+			}},
+			want: `{"SvcParams":[],"SvcPriority":0,"TargetName":"alias.example.com."}`,
+		},
+		{
+			name: "HTTPS record",
+			rdata: RecordHTTPS{RecordSVCB: RecordSVCB{
+				SvcPriority: 1,
+				TargetName:  testDomainName(t, "svc.example.com."),
+				SvcParams: []SvcParam{
+					{Key: KeyAlpn, Value: []byte{0x02, 'h', '2', 0x02, 'h', '3'}},
+					{Key: KeyIPv4Hint, Value: []byte{192, 0, 2, 1, 192, 0, 2, 2}},
+				},
+			}},
+			want: `{"SvcParams":[{"Key":"alpn","Raw":"AmgyAmgz","Value":"h2,h3"},{"Key":"ipv4hint","Raw":"wAACAcAAAgI","Value":"192.0.2.1,192.0.2.2"}],"SvcPriority":1,"TargetName":"svc.example.com."}`,
+		},
+		{
 			name:  "unknown type record",
 			rdata: RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}},
 			want:  `{"Data":"ZmY","rtype":"TYPE100"}`,
@@ -164,6 +199,36 @@ func TestResourceRecordMarshalJSON(t *testing.T) {
 				RData: NewRecordA([4]byte{192, 134, 1, 21}),
 			},
 			want: `{"Class":"IN","Name":"example.com.","RData":{"address":"192.134.1.21"},"TTL":300,"Type":"A"}`,
+		},
+		{
+			name: "SVCB record",
+			rr: ResourceRecord{
+				Name:  testDomainName(t, "svcb.example.com"),
+				Class: CLASS_IN,
+				Type:  TYPE_SVCB,
+				TTL:   300,
+				RData: RecordSVCB{
+					SvcPriority: 1,
+					TargetName:  testDomainName(t, "svcb.example.com."),
+					SvcParams:   []SvcParam{{Key: KeyPort, Value: []byte{0x20, 0xFB}}},
+				},
+			},
+			want: `{"Class":"IN","Name":"svcb.example.com.","RData":{"SvcParams":[{"Key":"port","Raw":"IPs","Value":"8443"}],"SvcPriority":1,"TargetName":"svcb.example.com."},"TTL":300,"Type":"SVCB"}`,
+		},
+		{
+			name: "HTTPS record",
+			rr: ResourceRecord{
+				Name:  testDomainName(t, "svc.example.com"),
+				Class: CLASS_IN,
+				Type:  TYPE_HTTPS,
+				TTL:   300,
+				RData: RecordHTTPS{RecordSVCB: RecordSVCB{
+					SvcPriority: 1,
+					TargetName:  testDomainName(t, "svc.example.com."),
+					SvcParams:   []SvcParam{{Key: KeyAlpn, Value: []byte{0x02, 'h', '2'}}}},
+				},
+			},
+			want: `{"Class":"IN","Name":"svc.example.com.","RData":{"SvcParams":[{"Key":"alpn","Raw":"Amgy","Value":"h2"}],"SvcPriority":1,"TargetName":"svc.example.com."},"TTL":300,"Type":"HTTPS"}`,
 		},
 		{
 			name: "unknown type record",
@@ -438,6 +503,92 @@ func TestRecordUnmarshalJSON(t *testing.T) {
 			want: NewRecordDNSKEY(256, 3, 1, []byte{0x01, 0x02}),
 		},
 		{
+			name: "SVCB record",
+			json: `{"SvcParams":[{"Key":"alpn","Raw":"AmgyAmgz","Value":"h2,h3"},{"Key":"port","Raw":"IPs","Value":"8443"}],"SvcPriority":1,"TargetName":"svcb.example.com."}`,
+			want: RecordSVCB{
+				SvcPriority: 1,
+				TargetName:  testDomainName(t, "svcb.example.com."),
+				SvcParams: []SvcParam{
+					{Key: KeyAlpn, Value: []byte{0x02, 'h', '2', 0x02, 'h', '3'}},
+					{Key: KeyPort, Value: []byte{0x20, 0xFB}},
+				},
+			},
+		},
+		{
+			// A SvcParams list without the Raw field is read in the
+			// presentation form of each key.
+			name: "SVCB record whose params are given as text",
+			json: `{"SvcParams":[{"Key":"mandatory","Value":"alpn,port"},{"Key":"alpn","Value":"h2"},{"Key":"port","Value":"8443"}],"SvcPriority":1,"TargetName":"svcb.example.com."}`,
+			want: RecordSVCB{
+				SvcPriority: 1,
+				TargetName:  testDomainName(t, "svcb.example.com."),
+				SvcParams: []SvcParam{
+					{Key: KeyMandatory, Value: []byte{0x00, 0x01, 0x00, 0x03}},
+					{Key: KeyAlpn, Value: []byte{0x02, 'h', '2'}},
+					{Key: KeyPort, Value: []byte{0x20, 0xFB}},
+				},
+			},
+		},
+		{
+			// The params of a JSON object are not in the order of their key
+			// numbers, which is the order the decoded record holds them in.
+			name: "SVCB record whose params are not in key order",
+			json: `{"SvcParams":[{"Key":"port","Value":"8443"},{"Key":"alpn","Value":"h2"}],"SvcPriority":1,"TargetName":"svcb.example.com."}`,
+			want: RecordSVCB{
+				SvcPriority: 1,
+				TargetName:  testDomainName(t, "svcb.example.com."),
+				SvcParams: []SvcParam{
+					{Key: KeyAlpn, Value: []byte{0x02, 'h', '2'}},
+					{Key: KeyPort, Value: []byte{0x20, 0xFB}},
+				},
+			},
+		},
+		{
+			name: "AliasMode HTTPS record",
+			json: `{"SvcParams":[],"SvcPriority":0,"TargetName":"alias.example.com."}`,
+			want: RecordHTTPS{RecordSVCB: RecordSVCB{
+				SvcPriority: 0,
+				TargetName:  testDomainName(t, "alias.example.com."),
+			}},
+		},
+		{
+			name: "HTTPS record with an IPv6 hint",
+			json: `{"SvcParams":[{"Key":"ipv6hint","Raw":"IAENuAAAAAAAAAAAAAAAASABDbgAAAAAAAAAAAAAAAIgAQ24AAAAAAAAAAAAAAADIAENuAAAAAAAAAAAAAAABA","Value":"2001:db8::1,2001:db8::2,2001:db8::3,2001:db8::4"}],"SvcPriority":1,"TargetName":"svc.example.com."}`,
+			want: RecordHTTPS{RecordSVCB: RecordSVCB{
+				SvcPriority: 1,
+				TargetName:  testDomainName(t, "svc.example.com."),
+				SvcParams: []SvcParam{{Key: KeyIPv6Hint, Value: []byte{
+					0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+					0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2,
+					0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3,
+					0x20, 0x01, 0x0d, 0xb8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 4,
+				}}},
+			}},
+		},
+		{
+			name: "AliasMode HTTPS record whose SvcParams are absent",
+			json: `{"SvcPriority":0,"TargetName":"alias.example.com."}`,
+			want: RecordHTTPS{RecordSVCB: RecordSVCB{SvcPriority: 0, TargetName: testDomainName(t, "alias.example.com.")}},
+		},
+		{
+			name: "HTTPS record with a param that has no value",
+			json: `{"SvcParams":[{"Key":"no-default-alpn","Raw":"","Value":""}],"SvcPriority":1,"TargetName":"svc.example.com."}`,
+			want: RecordHTTPS{RecordSVCB: RecordSVCB{
+				SvcPriority: 1,
+				TargetName:  testDomainName(t, "svc.example.com."),
+				SvcParams:   []SvcParam{{Key: KeyNoDefaultAlpn}},
+			}},
+		},
+		{
+			name: "HTTPS record with an unregistered SvcParamKey",
+			json: `{"SvcParams":[{"Key":"key7","Raw":"YWI","Value":"ab"}],"SvcPriority":1,"TargetName":"svc.example.com."}`,
+			want: RecordHTTPS{RecordSVCB: RecordSVCB{
+				SvcPriority: 1,
+				TargetName:  testDomainName(t, "svc.example.com."),
+				SvcParams:   []SvcParam{{Key: SvcParamKey(7), Value: []byte{'a', 'b'}}},
+			}},
+		},
+		{
 			name: "unknown type record",
 			json: `{"Data":"ZmY","rtype":"TYPE100"}`,
 			want: RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}},
@@ -527,6 +678,41 @@ func TestRecordUnmarshalJSONErrors(t *testing.T) {
 			rdata: RecordRaw{},
 		},
 		{
+			name:  "SVCB record with an unknown SvcParamKey",
+			json:  `{"SvcPriority":1,"TargetName":"svcb.example.com.","SvcParams":[{"Key":"zzz","Value":"x"}]}`,
+			rdata: RecordSVCB{},
+		},
+		{
+			name:  "SVCB record with a malformed target name",
+			json:  `{"SvcPriority":1,"TargetName":"a..b.","SvcParams":[]}`,
+			rdata: RecordSVCB{},
+		},
+		{
+			name:  "SVCB record with a port that is out of range",
+			json:  `{"SvcPriority":1,"TargetName":"svcb.example.com.","SvcParams":[{"Key":"port","Value":"65536"}]}`,
+			rdata: RecordSVCB{},
+		},
+		{
+			name:  "HTTPS record whose SvcParams do not fit a 16-bit RDATA",
+			json:  `{"SvcPriority":1,"TargetName":"svc.example.com.","SvcParams":[{"Key":"ech","Value":"` + strings.Repeat("a", 70000) + `"}]}`,
+			rdata: RecordHTTPS{},
+		},
+		{
+			name:  "HTTPS AliasMode record with SvcParams",
+			json:  `{"SvcPriority":0,"TargetName":"alias.example.com.","SvcParams":[{"Key":"alpn","Value":"h2"}]}`,
+			rdata: RecordHTTPS{},
+		},
+		{
+			name:  "HTTPS record with a mandatory param naming a key the record does not have",
+			json:  `{"SvcPriority":1,"TargetName":"svc.example.com.","SvcParams":[{"Key":"mandatory","Value":"alpn"}]}`,
+			rdata: RecordHTTPS{},
+		},
+		{
+			name:  "HTTPS record with a Raw that is not base64",
+			json:  `{"SvcPriority":1,"TargetName":"svc.example.com.","SvcParams":[{"Key":"alpn","Raw":"!!!"}]}`,
+			rdata: RecordHTTPS{},
+		},
+		{
 			name:  "OPT record with an option that has no code",
 			json:  `{"Flags":0,"Options":[{"Code":"x"}],"Version":0}`,
 			rdata: RecordOPT{},
@@ -561,6 +747,16 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 	dnameRecord := NewRecordDNAME(testDomainName(t, "sub.example.com"))
 	txtRecord := NewRecordTXT([]byte("v=spf1 -all"))
 	rawRecord := RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}}
+	svcbRecord := RecordSVCB{
+		SvcPriority: 1,
+		TargetName:  testDomainName(t, "svcb.example.com."),
+		SvcParams:   []SvcParam{{Key: KeyPort, Value: []byte{0x20, 0xFB}}},
+	}
+	httpsRecord := RecordHTTPS{RecordSVCB: RecordSVCB{
+		SvcPriority: 1,
+		TargetName:  testDomainName(t, "svc.example.com."),
+		SvcParams:   []SvcParam{{Key: KeyAlpn, Value: []byte{0x02, 'h', '2'}}},
+	}}
 
 	tests := []struct {
 		name string
@@ -631,6 +827,28 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 				Type:  TYPE_TXT,
 				TTL:   300,
 				RData: &txtRecord,
+			},
+		},
+		{
+			name: "SVCB record",
+			json: `{"Class":"IN","Name":"svcb.example.com.","RData":{"SvcParams":[{"Key":"port","Raw":"IPs","Value":"8443"}],"SvcPriority":1,"TargetName":"svcb.example.com."},"TTL":300,"Type":"SVCB"}`,
+			want: ResourceRecord{
+				Name:  testDomainName(t, "svcb.example.com"),
+				Class: CLASS_IN,
+				Type:  TYPE_SVCB,
+				TTL:   300,
+				RData: &svcbRecord,
+			},
+		},
+		{
+			name: "HTTPS record with the type given as a number",
+			json: `{"Class":"IN","Name":"svc.example.com.","RData":{"SvcParams":[{"Key":"alpn","Raw":"Amgy","Value":"h2"}],"SvcPriority":1,"TargetName":"svc.example.com."},"TTL":300,"Type":65}`,
+			want: ResourceRecord{
+				Name:  testDomainName(t, "svc.example.com"),
+				Class: CLASS_IN,
+				Type:  TYPE_HTTPS,
+				TTL:   300,
+				RData: &httpsRecord,
 			},
 		},
 		{
@@ -890,6 +1108,19 @@ func TestMessageJSONRoundTrip(t *testing.T) {
 	dnskeyRecord := NewRecordDNSKEY(256, 3, 1, []byte{0x01, 0x02})
 	rawRecord := RecordRaw{rtype: 100, Data: []byte{0x66, 0x66}}
 	optRecord := NewRecordOPT(0, 0x8000, &EDNSOptionDNSSEC{}, &EDNSOptionNSID{ID: "ednsx"}, &EDNSOptionEDE{ErrorCode: 6, ExtraText: "bogus"}, &EDNSOptionRaw{OptionCode: 8, OptionData: []byte{0x00, 0x00, 0x01, 0x18, 0x01, 0xc6, 0x33, 0x64}})
+	svcbRecord := RecordSVCB{
+		SvcPriority: 1,
+		TargetName:  testDomainName(t, "svcb.example.com."),
+		SvcParams: []SvcParam{
+			{Key: KeyAlpn, Value: []byte{0x02, 'h', '2', 0x02, 'h', '3'}},
+			{Key: KeyPort, Value: []byte{0x20, 0xFB}},
+		},
+	}
+	httpsRecord := RecordHTTPS{RecordSVCB: RecordSVCB{
+		SvcPriority: 1,
+		TargetName:  testDomainName(t, "svc.example.com."),
+		SvcParams:   []SvcParam{{Key: KeyAlpn, Value: []byte{0x02, 'h', '2'}}},
+	}}
 
 	tests := []struct {
 		name string
@@ -936,7 +1167,7 @@ func TestMessageJSONRoundTrip(t *testing.T) {
 				AA:      1,
 				RD:      1,
 				RA:      1,
-				ANCOUNT: 9,
+				ANCOUNT: 11,
 				ARCOUNT: 1,
 				AnswerSection: []ResourceRecord{
 					ResourceRecord{
@@ -994,6 +1225,20 @@ func TestMessageJSONRoundTrip(t *testing.T) {
 						Type:  TYPE_DNSKEY,
 						TTL:   300,
 						RData: &dnskeyRecord,
+					},
+					ResourceRecord{
+						Name:  testDomainName(t, "example.com"),
+						Class: CLASS_IN,
+						Type:  TYPE_SVCB,
+						TTL:   300,
+						RData: &svcbRecord,
+					},
+					ResourceRecord{
+						Name:  testDomainName(t, "svc.example.com"),
+						Class: CLASS_IN,
+						Type:  TYPE_HTTPS,
+						TTL:   300,
+						RData: &httpsRecord,
 					},
 					ResourceRecord{
 						Name:  testDomainName(t, "example.com"),

@@ -16,6 +16,11 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
   - Extended DNS Errors / EDE（RFC 8914）
   - 未定義オプショコードの生データ保持（`EDNSOptionRaw`）および
     カスタムパーサの登録（`RegisterEDNSOptionParser`）
+- SVCB / HTTPS サービスレコード（RFC 9460）: `RecordSVCB` / `RecordHTTPS` での
+  SvcPriority・TargetName・SvcParams の読み書き、登録済み SvcParamKey
+  （mandatory・alpn・no-default-alpn・port・ipv4hint・ech・ipv6hint）と
+  未登録キー（`key7` などの key + 10 進数）の zone file 表現の解析・生成
+  （`docs/record-svcb.md`）
 - TSIG による DNS メッセージの鍵ベース認証（RFC 8945）:
   - `Message.SignTSIG` / `Message.VerifyTSIG` での署名と検証
   - 共有鍵（`TSIGKey`）、署名オプション（`TSIGOptions`）、検証オプション（`TSIGVerifyOptions`）
@@ -60,6 +65,8 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | DS       | `TYPE_DS` (43)   | `RecordDS`     |
 | RRSIG    | `TYPE_RRSIG` (46)| `RecordRRSIG`  |
 | DNSKEY   | `TYPE_DNSKEY` (48)| `RecordDNSKEY` |
+| SVCB     | `TYPE_SVCB` (64) | `RecordSVCB`（[record-svcb.md](record-svcb.md) 参照） |
+| HTTPS    | `TYPE_HTTPS` (65)| `RecordHTTPS`（[record-https.md](record-https.md) 参照） |
 | TKEY     | `TYPE_TKEY` (249)| `RecordTKEY`   |
 
 ## ドキュメント目次
@@ -78,6 +85,8 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [record-nsec.md](record-nsec.md) | NSEC レコード（RFC 4034） |
 | [record-nsec3.md](record-nsec3.md) | NSEC3 レコード（RFC 5155） |
 | [record-nsec3param.md](record-nsec3param.md) | NSEC3PARAM レコード（RFC 5155） |
+| [record-svcb.md](record-svcb.md) | SVCB レコード（RFC 9460） |
+| [record-https.md](record-https.md) | HTTPS レコード（RFC 9460） |
 | [record-tkey.md](record-tkey.md) | TKEY レコード（RFC 2930） |
 | [tsig.md](tsig.md) | TSIG による DNS メッセージの署名と検証（RFC 8945） |
 | [dq.md](dq.md) | `dq` コマンド（`cmd/dq`）: 問い合わせ送信と送信・受信メッセージの JSON / base64 表示 |
