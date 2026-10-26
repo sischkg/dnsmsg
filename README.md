@@ -104,6 +104,7 @@ go build -o dq ./cmd/dq
 - SVCB / HTTPS のサービス参数（RFC 9460、SvcPriority・TargetName・SvcParams と zone file 表現）
 - TSIG によるメッセージ認証（RFC 8945、HMAC-MD5 / SHA1 / SHA224 / SHA256 / SHA384 / SHA512）
 - TKEY によるセッション鍵の negotiate（RFC 2930、モードとエラーコードの読み書き）
+- TLSA による certificate association（RFC 6698、usage・selector・matching type と認証データ）
 - DNSSEC: RRSet の正規ワイヤフォーマット、`SignRRSet` による署名、`VerifyRRSet` による検証、
   NSEC / NSEC3 によるゾーン署名、BIND `dnssec-keygen` の鍵ファイル読み込み
 - DNS ゾーン管理（`Zone`、`ResourceRecordsToZone`、`Zone.Sign` / `Zone.SignNSEC3`）
@@ -132,6 +133,7 @@ go build -o dq ./cmd/dq
 | DNSKEY | `TYPE_DNSKEY` (48) | `RecordDNSKEY` |
 | NSEC3 | `TYPE_NSEC3` (50) | `RecordNSEC3` |
 | NSEC3PARAM | `TYPE_NSEC3PARAM` (51) | `RecordNSEC3PARAM` |
+| TLSA | `TYPE_TLSA` (52) | `RecordTLSA` |
 | SVCB | `TYPE_SVCB` (64) | `RecordSVCB` |
 | HTTPS | `TYPE_HTTPS` (65) | `RecordHTTPS` |
 | TKEY | `TYPE_TKEY` (249) | `RecordTKEY` |

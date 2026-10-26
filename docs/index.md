@@ -65,6 +65,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | DS       | `TYPE_DS` (43)   | `RecordDS`     |
 | RRSIG    | `TYPE_RRSIG` (46)| `RecordRRSIG`  |
 | DNSKEY   | `TYPE_DNSKEY` (48)| `RecordDNSKEY` |
+| TLSA     | `TYPE_TLSA` (52) | `RecordTLSA`（[record-tlsa.md](record-tlsa.md) 参照） |
 | SVCB     | `TYPE_SVCB` (64) | `RecordSVCB`（[record-svcb.md](record-svcb.md) 参照） |
 | HTTPS    | `TYPE_HTTPS` (65)| `RecordHTTPS`（[record-https.md](record-https.md) 参照） |
 | TKEY     | `TYPE_TKEY` (249)| `RecordTKEY`   |
@@ -88,6 +89,7 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | [record-svcb.md](record-svcb.md) | SVCB レコード（RFC 9460） |
 | [record-https.md](record-https.md) | HTTPS レコード（RFC 9460） |
 | [record-tkey.md](record-tkey.md) | TKEY レコード（RFC 2930） |
+| [record-tlsa.md](record-tlsa.md) | TLSA レコード（RFC 6698） |
 | [tsig.md](tsig.md) | TSIG による DNS メッセージの署名と検証（RFC 8945） |
 | [dq.md](dq.md) | `dq` コマンド（`cmd/dq`）: 問い合わせ送信と送信・受信メッセージの JSON / base64 表示 |
 
