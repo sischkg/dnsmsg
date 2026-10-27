@@ -509,15 +509,17 @@ func TestResourceRecordTXT(t *testing.T) {
 }
 
 // TestRecordTXTJSON verifies the JSON form of a TXT record: each
-// character-string is exported as a base64 string.
+// character-string is exported as a presentation-format string, not as a
+// base64 string, and the record is also imported from a plain array of
+// character-strings.
 func TestRecordTXTJSON(t *testing.T) {
-	txt := NewRecordTXT([]byte("hello world"), []byte{0x00, 0x01})
+	txt := NewRecordTXT([]byte("hello world"), []byte{0x00, 0x01}, []byte(`say "hi" \`))
 
 	data, err := json.Marshal(txt)
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	want := `{"Strings":["aGVsbG8gd29ybGQ","AAE"]}`
+	want := `{"Strings":["hello world","\\000\\001","say \\\"hi\\\" \\\\"]}`
 	if string(data) != want {
 		t.Errorf("json.Marshal() = %q, want %q", string(data), want)
 	}
@@ -530,8 +532,17 @@ func TestRecordTXTJSON(t *testing.T) {
 		t.Errorf("json.Unmarshal() = %q, want %q", got, txt)
 	}
 
+	// The same record is imported from a plain array of character-strings.
+	var fromArray RecordTXT
+	if err := json.Unmarshal([]byte(`["hello world","\\000\\001","say \\"hi\\" \\\\"]"`), &fromArray); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+	if !reflect.DeepEqual(fromArray, txt) {
+		t.Errorf("json.Unmarshal() = %q, want %q", fromArray, txt)
+	}
+
 	var invalid RecordTXT
-	if err := json.Unmarshal([]byte(`{"Strings":["!!!" ]}`), &invalid); err == nil {
+	if err := json.Unmarshal([]byte(`{"Strings":["\\999"]}`), &invalid); err == nil {
 		t.Error("json.Unmarshal() error = nil, want an error")
 	}
 }

@@ -81,11 +81,16 @@ func (r RecordTXT) AppendCanonicalWireFormat(w *WireFormat) uint32 {
 }
 
 // MarshalJSON encodes the record as a JSON object.  The character-strings
-// are octet strings, so they are encoded as base64 strings.
+// are exported as plain strings in the presentation format of
+// RecordTXT.String rather than base64: '"' and '\' are backslash-escaped,
+// non-printable octets are written as three-digit decimal escapes such as
+// "\065", and the other printable octets are written as themselves.  No
+// quotes enclose a character-string: the JSON string syntax supplies the
+// quoting.
 func (r RecordTXT) MarshalJSON() ([]byte, error) {
 	stringsJSON := make([]string, 0, len(r.Strings))
 	for _, s := range r.Strings {
-		stringsJSON = append(stringsJSON, encodeBase64(s))
+		stringsJSON = append(stringsJSON, characterStringJSON(s))
 	}
 	return json.Marshal(map[string]any{
 		"Strings": stringsJSON,
@@ -93,17 +98,24 @@ func (r RecordTXT) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON decodes the record from the JSON object MarshalJSON
-// produces, taking each character-string from its base64 string.
+// produces, taking each character-string from its presentation-format
+// string.  A TXT record is also accepted as a plain array of its
+// character-strings: ["v=spf1 -all"] imports the same record as
+// {"Strings":["v=spf1 -all"]}.
 func (r *RecordTXT) UnmarshalJSON(data []byte) error {
 	var fields struct {
 		Strings []string `json:"Strings"`
 	}
 	if err := json.Unmarshal(data, &fields); err != nil {
-		return fmt.Errorf("cannot parse TXT record: %w", err)
+		var strs []string
+		if errArray := json.Unmarshal(data, &strs); errArray != nil {
+			return fmt.Errorf("cannot parse TXT record: %w", err)
+		}
+		fields.Strings = strs
 	}
 	var stringsDecoded [][]byte
 	for _, s := range fields.Strings {
-		octets, err := decodeBase64(s)
+		octets, err := parseJSONCharacterString(s)
 		if err != nil {
 			return fmt.Errorf("invalid TXT character-string %q: %w", s, err)
 		}
@@ -205,9 +217,15 @@ func ParseRecordTXT(w WireFormat, begin uint32, end uint32) (r RecordTXT, pos ui
 // quoteCharacterString returns s as a quoted presentation-format
 // character-string, following the escaping rules of RecordTXT.String.
 func quoteCharacterString(s []byte) string {
+	return `"` + characterStringJSON(s) + `"`
+}
+
+// characterStringJSON returns s as the content of a JSON string, following
+// the escaping rules of quoteCharacterString but without the enclosing
+// quotes: the JSON string syntax supplies the quoting.
+func characterStringJSON(s []byte) string {
 	var buf strings.Builder
-	buf.Grow(len(s) + 2)
-	buf.WriteByte('"')
+	buf.Grow(len(s))
 	for _, c := range s {
 		switch {
 		case c == '"' || c == '\\':
@@ -222,8 +240,38 @@ func quoteCharacterString(s []byte) string {
 			buf.WriteByte('0' + c%10)
 		}
 	}
-	buf.WriteByte('"')
 	return buf.String()
+}
+
+// parseJSONCharacterString parses the octets of a character-string from the
+// content of a JSON string as produced by characterStringJSON: a backslash
+// introduces an escape as in the presentation format (RFC 4343), and every
+// other octet, including '"', is taken as itself.  A content longer than
+// one character-string is an error.
+func parseJSONCharacterString(s string) ([]byte, error) {
+	// The empty non-nil slice keeps the result consistent with
+	// ParseRecordTXT, whose zero-length character-string is also non-nil.
+	str := []byte{}
+	for pos := 0; pos < len(s); {
+		var octet byte
+		var next int
+		if s[pos] == '\\' {
+			var err error
+			octet, next, err = parsePresentationOctet(s, pos)
+			if err != nil {
+				return nil, err
+			}
+		} else {
+			octet = s[pos]
+			next = pos + 1
+		}
+		if len(str) >= txtMaxStringLength {
+			return nil, fmt.Errorf("character-string is too long(length exceeds %d)", txtMaxStringLength)
+		}
+		str = append(str, octet)
+		pos = next
+	}
+	return str, nil
 }
 
 // isTXTDelimiter reports whether c separates two character-strings in

@@ -84,12 +84,12 @@ func TestRecordMarshalJSON(t *testing.T) {
 		{
 			name:  "TXT record",
 			rdata: NewRecordTXT([]byte("v=spf1 -all")),
-			want:  `{"Strings":["dj1zcGYxIC1hbGw"]}`,
+			want:  `{"Strings":["v=spf1 -all"]}`,
 		},
 		{
 			name:  "TXT record with several character-strings",
 			rdata: NewRecordTXT([]byte("hello world"), []byte{0x00, 0x01}),
-			want:  `{"Strings":["aGVsbG8gd29ybGQ","AAE"]}`,
+			want:  `{"Strings":["hello world","\\000\\001"]}`,
 		},
 		{
 			name:  "AAAA record",
@@ -420,7 +420,8 @@ func copyRDATA(rdata RDATA) any {
 }
 
 // TestRecordUnmarshalJSON tests that resource records are imported from the
-// JSON objects MarshalJSON produces.
+// JSON objects MarshalJSON produces.  A TXT record is also imported from a
+// plain array of its character-strings.
 func TestRecordUnmarshalJSON(t *testing.T) {
 	tests := []struct {
 		name string
@@ -464,13 +465,18 @@ func TestRecordUnmarshalJSON(t *testing.T) {
 		},
 		{
 			name: "TXT record",
-			json: `{"Strings":["dj1zcGYxIC1hbGw"]}`,
+			json: `{"Strings":["v=spf1 -all"]}`,
 			want: NewRecordTXT([]byte("v=spf1 -all")),
 		},
 		{
 			name: "TXT record with several character-strings",
-			json: `{"Strings":["aGVsbG8gd29ybGQ","AAE"]}`,
+			json: `{"Strings":["hello world","\\000\\001"]}`,
 			want: NewRecordTXT([]byte("hello world"), []byte{0x00, 0x01}),
+		},
+		{
+			name: "TXT record given as a plain array of character-strings",
+			json: `["v=spf1 -all"]`,
+			want: NewRecordTXT([]byte("v=spf1 -all")),
 		},
 		{
 			name: "DNAME record",
@@ -664,7 +670,7 @@ func TestRecordUnmarshalJSONErrors(t *testing.T) {
 		},
 		{
 			name:  "TXT record with a malformed character-string",
-			json:  `{"Strings":["!!!"]}`,
+			json:  `{"Strings":["\\999"]}`,
 			rdata: RecordTXT{},
 		},
 		{
@@ -820,7 +826,18 @@ func TestResourceRecordUnmarshalJSON(t *testing.T) {
 		},
 		{
 			name: "TXT record",
-			json: `{"Class":"IN","Name":"txt.example.com.","RData":{"Strings":["dj1zcGYxIC1hbGw="]},"TTL":300,"Type":"TXT"}`,
+			json: `{"Class":"IN","Name":"txt.example.com.","RData":{"Strings":["v=spf1 -all"]},"TTL":300,"Type":"TXT"}`,
+			want: ResourceRecord{
+				Name:  testDomainName(t, "txt.example.com"),
+				Class: CLASS_IN,
+				Type:  TYPE_TXT,
+				TTL:   300,
+				RData: &txtRecord,
+			},
+		},
+		{
+			name: "TXT record with the RData given as a plain array of character-strings",
+			json: `{"Class":"IN","Name":"txt.example.com.","RData":["v=spf1 -all"],"TTL":300,"Type":"TXT"}`,
 			want: ResourceRecord{
 				Name:  testDomainName(t, "txt.example.com"),
 				Class: CLASS_IN,

@@ -179,20 +179,30 @@ RDATA にドメイン名は含まれないため、変換的对象はありま�
 ## JSON
 
 `RecordTXT` は `MarshalJSON` / `UnmarshalJSON` を持ちます。character-string は
-オクテット列なので base64 文字列としてエンコードされます。base64 は
-パディングなし（RFC 4634）で、デコード時はパディングありの形式も受け付けます。
+base64 ではなく、`RecordTXT.String()` と同じ表示形式の文字列として出力され
+ます。引用符（`"`）とバックスラッシュ（`\`）は `\"` と `\\` にエスケープ
+され、印字できないオクテット（0x20 未満と 0x7e より大きい値）は `\065` の
+ような 3 桁の十進数エスケープになります（RFC 4343）。表示形式を囲む二重
+引用符は付きません。引用は JSON の文字列構文が担うためです。
 
 ```go
 json.Marshal(txt)
-// {"Strings":["dj1zcGYxIC1hbGw"]}
+// {"Strings":["v=spf1 -all"]}
 
 json.Marshal(rr) // rr.Type == TYPE_TXT の場合
-// {"Class":"IN","Name":"txt.example.com.","RData":{"Strings":["dj1zcGYxIC1hbGw"]},"TTL":300,"Type":"TXT"}
+// {"Class":"IN","Name":"txt.example.com.","RData":{"Strings":["v=spf1 -all"]},"TTL":300,"Type":"TXT"}
 ```
 
 `ResourceRecord.UnmarshalJSON` は `Type` が `"TXT"`（または 16）のとき
-`RData` を `RecordTXT` としてデコードします。base64 として不正な文字列
-（`"!!!"` など）はエラーになります。
+`RData` を `RecordTXT` としてデコードします。入力時は `{"Strings": [...]}`
+のオブジェクト形式だけでなく、character-string を並べた配列形式
+（`["v=spf1 -all"]`、レコード全体の JSON では `"RData": ["v=spf1 -all"]`）
+も受け付けます。配列形式で入力したときの内容も、オブジェクト形式と同じ
+デコード（バックスラッシュ escape の解釈）が行われます。JSON 文字列の
+中身はバックスラッシュ escape（`\065` のような 3 桁十進数、`\"`、`\\`
+など）を解釈してオクテット列に戻します。不正な character-string（`\999`
+のように 3 桁十進数が 255 を超えるもの、末尾がバックスラッシュのもの、1
+個の character-string の長さ上限を超えるもの）はエラーになります。
 
 ## 補足
 
