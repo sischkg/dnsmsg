@@ -534,7 +534,7 @@ func TestRecordTXTJSON(t *testing.T) {
 
 	// The same record is imported from a plain array of character-strings.
 	var fromArray RecordTXT
-	if err := json.Unmarshal([]byte(`["hello world","\\000\\001","say \\"hi\\" \\\\"]"`), &fromArray); err != nil {
+	if err := json.Unmarshal([]byte(`["hello world","\\000\\001","say \\\"hi\\\" \\\\"]`), &fromArray); err != nil {
 		t.Fatalf("json.Unmarshal() error = %v", err)
 	}
 	if !reflect.DeepEqual(fromArray, txt) {
