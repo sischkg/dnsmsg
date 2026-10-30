@@ -40,6 +40,39 @@ func craftedErrorWire(rtype ResourceType, rdlen uint16, rdata ...byte) WireForma
 	return w
 }
 
+func TestNewType(t *testing.T) {
+	tests := []struct {
+		name    string
+		s       string
+		want    ResourceType
+		wantErr bool
+	}{
+		{name: "uppercase", s: "TXT", want: TYPE_TXT},
+		{name: "lowercase", s: "txt", want: TYPE_TXT},
+		{name: "mixed case", s: "soA", want: TYPE_SOA},
+		{name: "lowercase numeric", s: "type16", want: TYPE_TXT},
+		{name: "uppercase numeric", s: "TYPE15", want: TYPE_MX},
+		{name: "unknown", s: "nope", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := NewType(tt.s)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("NewType(%q) err = nil, want error", tt.s)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("NewType(%q) error = %v", tt.s, err)
+			}
+			if got != tt.want {
+				t.Errorf("NewType(%q) = %v, want %v", tt.s, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestParseWireFormat(t *testing.T) {
 	example := testDomainName(t, "example.com.")
 

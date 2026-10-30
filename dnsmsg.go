@@ -9,6 +9,7 @@ import (
 	"net"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -123,13 +124,14 @@ func (t ResourceType) String() string {
 }
 
 func NewType(s string) (ResourceType, error) {
+	name := strings.ToUpper(s)
 	pattern := regexp.MustCompile(`TYPE(\d+)`)
-	matched := pattern.FindStringSubmatch(s)
+	matched := pattern.FindStringSubmatch(name)
 	if len(matched) > 0 {
 		t, _ := strconv.ParseUint(matched[1], 10, 16)
 		return ResourceType(t), nil
 	}
-	switch s {
+	switch name {
 	case "A":
 		return TYPE_A, nil
 	case "NS":
