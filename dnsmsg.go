@@ -961,14 +961,27 @@ type QueryExchange struct {
 
 // Exchange sends query to target:port over transport (DNSoverUDP or
 // DNSoverTCP), reads the reply, and reports the whole exchange as a
-// QueryExchange.  It is the implementation behind SendQueryWithTimeout, and it
-// exists on its own for the programs that need the wire format of the messages
-// or the times they were sent and received, such as an output format that
-// prints the messages as they went on the wire.
+// QueryExchange.  It exists on its own for the programs that need the wire
+// format of the messages or the times they were sent and received, such as an
+// output format that prints the messages as they went on the wire.
 //
 // timeout limits the connect, write and read steps; a timeout of zero or less
-// means no timeout.
+// means no timeout.  ExchangeWithConnectTimeout is this call with the two
+// steps' deadlines given separately.
 func Exchange(query Message, target string, port uint16, transport string, timeout time.Duration) (ex QueryExchange, err error) {
+	return ExchangeWithConnectTimeout(query, target, port, transport, timeout, timeout)
+}
+
+// ExchangeWithConnectTimeout is Exchange with a deadline of its own for
+// establishing the connection: connectTimeout limits net.DialTimeout, and
+// queryTimeout limits writing the query and reading the reply once the
+// connection exists.  queryTimeout is not reduced by the time the connection
+// took to establish.  A timeout of zero or less means the step it limits has
+// no timeout.
+//
+// Over UDP there is no connection to establish, so connectTimeout has no
+// visible effect there; the exchange over UDP is what Exchange gives.
+func ExchangeWithConnectTimeout(query Message, target string, port uint16, transport string, connectTimeout, queryTimeout time.Duration) (ex QueryExchange, err error) {
 	ex.Transport = transport
 	if transport != DNSoverUDP && transport != DNSoverTCP {
 		err = fmt.Errorf("unknown transport %s", transport)
@@ -979,15 +992,15 @@ func Exchange(query Message, target string, port uint16, transport string, timeo
 	ex.QueryWire.WriteWireFormat(query)
 
 	endpoint := net.JoinHostPort(target, strconv.Itoa(int(port)))
-	conn, e := net.DialTimeout(transport, endpoint, timeout)
+	conn, e := net.DialTimeout(transport, endpoint, connectTimeout)
 	if e != nil {
 		err = fmt.Errorf("cannot send message to %s:%d(%s)", target, port, e)
 		return
 	}
 	defer conn.Close()
 
-	if timeout > 0 {
-		if e = conn.SetDeadline(time.Now().Add(timeout)); e != nil {
+	if queryTimeout > 0 {
+		if e = conn.SetDeadline(time.Now().Add(queryTimeout)); e != nil {
 			err = fmt.Errorf("cannot set timeout for %s:%d(%s)", target, port, e)
 			return
 		}

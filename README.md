@@ -52,7 +52,9 @@ func main() {
 
 `Exchange` は実際に送受信したオクテット列と送受信時刻も `QueryExchange` で返します。
 TC ビットが立った応答を別トランスポートで問い直すことはしません（必要なときに `-tcp` /
-`dnsmsg.DNSoverTCP` を選んでください）。
+`dnsmsg.DNSoverTCP` を選んでください）。接続の締切と送受信の締切を分けるときは
+`ExchangeWithConnectTimeout` を使います（`Exchange` は同じ値を両方に渡した呼び出しです。
+[dnsmsg パッケージドキュメント](docs/index.md) の「接続のタイムアウトを分ける」参照）。
 
 ### wire format との往復
 

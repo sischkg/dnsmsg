@@ -258,3 +258,180 @@ func TestSendQueryWithTimeoutUnknownTransport(t *testing.T) {
 		t.Errorf("error = %v, want an unknown transport error", err)
 	}
 }
+
+// TestExchangeReportsTheExchange checks the QueryExchange Exchange reports for a
+// query that is answered: the octets that went on the wire and the times they
+// were written and read.
+func TestExchangeReportsTheExchange(t *testing.T) {
+	for _, transport := range []string{DNSoverUDP, DNSoverTCP} {
+		t.Run(transport, func(t *testing.T) {
+			var port uint16
+			if transport == DNSoverUDP {
+				port = serveUDP(t, func(q Message) Message { return answerFor(t, q, 1) })
+			} else {
+				port = serveTCP(t, func(q Message) Message { return answerFor(t, q, 1) }, 512)
+			}
+
+			query := queryFor(t, "example.com.")
+			ex, err := Exchange(query, "127.0.0.1", port, transport, 2*time.Second)
+			if err != nil {
+				t.Fatalf("Exchange(): %v", err)
+			}
+			if ex.Transport != transport {
+				t.Errorf("ex.Transport = %q, want %q", ex.Transport, transport)
+			}
+			var want WireFormat
+			want.WriteWireFormat(query)
+			if string(ex.QueryWire) != string(want) {
+				t.Errorf("ex.QueryWire = %d octets, want the %d octets of the query", ex.QueryWire.Size(), want.Size())
+			}
+			if ex.ReplyWire.Size() == 0 || ex.Reply.ID != query.ID || ex.Reply.ANCOUNT != 1 {
+				t.Fatalf("ex.ReplyWire/ex.Reply = %d octets / ID %#04x ANCOUNT %d, want a parsed one-answer reply", ex.ReplyWire.Size(), ex.Reply.ID, ex.Reply.ANCOUNT)
+			}
+			if ex.SentAt.IsZero() || ex.ReceivedAt.IsZero() || ex.ReceivedAt.Before(ex.SentAt) {
+				t.Errorf("ex.SentAt=%v ex.ReceivedAt=%v, want both times and the reply after the query", ex.SentAt, ex.ReceivedAt)
+			}
+		})
+	}
+}
+
+// TestExchangeWithConnectTimeoutSeparatesTheDeadlines is the reason the two
+// deadlines are separate: a connect deadline much shorter than the time the
+// server takes to answer must not end the exchange, and a read deadline must
+// not limit the connect.
+func TestExchangeWithConnectTimeoutSeparatesTheDeadlines(t *testing.T) {
+	const (
+		connectTimeout = 50 * time.Millisecond
+		queryTimeout   = 3 * time.Second
+		answerDelay    = 400 * time.Millisecond
+	)
+
+	for _, transport := range []string{DNSoverUDP, DNSoverTCP} {
+		t.Run(transport, func(t *testing.T) {
+			answer := func(q Message) Message {
+				time.Sleep(answerDelay)
+				return answerFor(t, q, 1)
+			}
+			var port uint16
+			if transport == DNSoverUDP {
+				port = serveUDP(t, answer)
+			} else {
+				port = serveTCP(t, answer, 512)
+			}
+
+			ex, err := ExchangeWithConnectTimeout(queryFor(t, "example.com."), "127.0.0.1", port, transport, connectTimeout, queryTimeout)
+			if err != nil {
+				t.Fatalf("ExchangeWithConnectTimeout(%s, connect %v, query %v): %v", transport, connectTimeout, queryTimeout, err)
+			}
+			if ex.Reply.ANCOUNT != 1 {
+				t.Errorf("reply ANCOUNT = %d, want 1", ex.Reply.ANCOUNT)
+			}
+			if ex.SentAt.IsZero() {
+				t.Error("ex.SentAt is the zero time, want the time the query was written")
+			}
+		})
+	}
+}
+
+// TestExchangeWithConnectTimeoutLimitsConnecting checks that a server that never
+// completes a connection is given up on at connectTimeout, not at queryTimeout:
+// 192.0.2.1 is the RFC 5737 TEST-NET-1 address, so nothing answers its SYNs.
+func TestExchangeWithConnectTimeoutLimitsConnecting(t *testing.T) {
+	const (
+		target         = "192.0.2.1"
+		connectTimeout = 200 * time.Millisecond
+		queryTimeout   = 5 * time.Second
+	)
+
+	query := queryFor(t, "example.com.")
+	start := time.Now()
+	ex, err := ExchangeWithConnectTimeout(query, target, 53, DNSoverTCP, connectTimeout, queryTimeout)
+	elapsed := time.Since(start)
+	if err == nil {
+		t.Fatalf("ExchangeWithConnectTimeout(%s) returned a reply from a server that does not answer", target)
+	}
+	if !strings.Contains(err.Error(), "cannot send message to") {
+		t.Errorf("error = %v, want a send/connect error", err)
+	}
+	if elapsed > 2*time.Second {
+		t.Errorf("gave up after %v, want about the %v connect timeout, not the %v query timeout", elapsed, connectTimeout, queryTimeout)
+	}
+	if !ex.SentAt.IsZero() {
+		t.Errorf("ex.SentAt = %v, want the zero time: nothing was written", ex.SentAt)
+	}
+	if ex.ReplyWire != nil {
+		t.Errorf("ex.ReplyWire = %d octets, want nil", ex.ReplyWire.Size())
+	}
+	var want WireFormat
+	want.WriteWireFormat(query)
+	if string(ex.QueryWire) != string(want) {
+		t.Error("ex.QueryWire does not hold the query that could not be sent")
+	}
+}
+
+// TestExchangeWithConnectTimeoutRefusedConnection checks what a connect that
+// fails for a reason of its own reports: the failed exchange and its query,
+// with no deadline reached.
+func TestExchangeWithConnectTimeoutRefusedConnection(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := uint16(ln.Addr().(*net.TCPAddr).Port)
+	ln.Close()
+
+	query := queryFor(t, "example.com.")
+	ex, err := ExchangeWithConnectTimeout(query, "127.0.0.1", port, DNSoverTCP, 0, 0)
+	if err == nil || !strings.Contains(err.Error(), "cannot send message to") {
+		t.Fatalf("error = %v, want a connect error", err)
+	}
+	if !ex.SentAt.IsZero() || ex.ReplyWire != nil {
+		t.Errorf("ex.SentAt = %v ex.ReplyWire = %d octets, want the zero time and nothing read", ex.SentAt, ex.ReplyWire.Size())
+	}
+	if ex.QueryWire.Size() == 0 {
+		t.Error("ex.QueryWire is empty, want the query that was not sent")
+	}
+}
+
+// TestExchangeMatchesExchangeWithConnectTimeout keeps Exchange a call to
+// ExchangeWithConnectTimeout with one value for both steps: the two report the
+// same exchange, whether the query was answered or not.
+func TestExchangeMatchesExchangeWithConnectTimeout(t *testing.T) {
+	const timeout = 2 * time.Second
+
+	t.Run("answered", func(t *testing.T) {
+		port := serveTCP(t, func(q Message) Message { return answerFor(t, q, 2) }, 11)
+		query := queryFor(t, "example.com.")
+
+		a, err := Exchange(query, "127.0.0.1", port, DNSoverTCP, timeout)
+		if err != nil {
+			t.Fatalf("Exchange(): %v", err)
+		}
+		b, err := ExchangeWithConnectTimeout(query, "127.0.0.1", port, DNSoverTCP, timeout, timeout)
+		if err != nil {
+			t.Fatalf("ExchangeWithConnectTimeout(): %v", err)
+		}
+		if a.Transport != b.Transport || string(a.QueryWire) != string(b.QueryWire) || string(a.ReplyWire) != string(b.ReplyWire) {
+			t.Error("Exchange and ExchangeWithConnectTimeout reported different octets")
+		}
+		if a.Reply.ANCOUNT != 2 || b.Reply.ANCOUNT != 2 {
+			t.Errorf("ANSWER counts = %d and %d, want 2 each", a.Reply.ANCOUNT, b.Reply.ANCOUNT)
+		}
+	})
+
+	t.Run("unanswered", func(t *testing.T) {
+		port := serveQuiet(t, DNSoverTCP)
+		query := queryFor(t, "example.com.")
+
+		_, errA := Exchange(query, "127.0.0.1", port, DNSoverTCP, 200*time.Millisecond)
+		_, errB := ExchangeWithConnectTimeout(query, "127.0.0.1", port, DNSoverTCP, 200*time.Millisecond, 200*time.Millisecond)
+		if errA == nil || errB == nil {
+			t.Fatalf("errors = %v and %v, want a timeout from both", errA, errB)
+		}
+		for _, err := range []error{errA, errB} {
+			if !strings.Contains(err.Error(), "cannot receive") {
+				t.Errorf("error = %v, want a receive error", err)
+			}
+		}
+	})
+}

@@ -38,7 +38,8 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
   - `Zone` 構造体（オリジン、デフォルト TTL、RRSet コレクション）
   - `AddRRSet` / `FindRRSet` / `RemoveRRSet` / `Equal` / `CanonicalWireFormat`
   - `ResourceRecordsToZone` で `[]ResourceRecord` を RRSet にグループ化して Zone を構築
-- UDP / TCP による DNS クエリ送信（`SendQuery` / `SendQueryWithTimeout` / `Exchange`）
+- UDP / TCP による DNS クエリ送信（`SendQuery` / `SendQueryWithTimeout` / `Exchange` /
+  `ExchangeWithConnectTimeout`）
 - `dq` コマンド（`cmd/dq`）: 指定したサーバへ問い合わせを送り、送信したメッセージと
   受信したメッセージを JSON または base64 で表示（`docs/dq.md`）
 
@@ -164,6 +165,29 @@ fmt.Printf("received %s  %d octets\n", ex.ReceivedAt.Format(time.RFC3339Nano), e
 - socket に何も書き出さなかったときは `SentAt` がゼロ時刻、応答を読み出さなかった
   ときは `ReplyWire` は nil で `Reply` は空のメッセージです。
 - 受信したオクテット列のパースに失敗したときは `ReplyWire` だけが入ります。
+
+### 接続のタイムアウトを分ける
+
+`Exchange` は接続・送信・受信の 3 ステップに一つの timeout を適用します。接続に
+だけ別の締切を設けたいプログラム（TCP で、応答を待つ時間とサーバにたどり着く
+時間を分けたいクライアントなど）向けに、同じ 3 ステップを締切を分けて扱う
+`ExchangeWithConnectTimeout` があります。`Exchange` は
+`connectTimeout` と `queryTimeout` に同じ値を渡した呼び出しです。
+
+```go
+// 接続には 250 ms、書き出しと読み出しには 2 s
+ex, err := dnsmsg.ExchangeWithConnectTimeout(query, "127.0.0.1", 53, dnsmsg.DNSoverTCP,
+	250*time.Millisecond, 2*time.Second)
+```
+
+- `connectTimeout` は `net.DialTimeout` の締切としてだけ使われます。
+- `queryTimeout` は接続が確立した後に `SetDeadline` で設定される締切で、送信と受信
+  の両方を制限します。接続の確立にかかった時間は `queryTimeout` を減らしません。
+- それぞれ 0 以下なら、そのステップに締切はありません。
+- UDP には接続というステップがありません（`net.Dial` はローカルの socket を用意する
+  だけ）ので、`connectTimeout` は UDP で目に見える効果を持ちません。
+- 返される `QueryExchange` は `Exchange` と同じもので、`SentAt` がゼロ時刻のまま
+  になるのは接続まで進まなかった場合です。
 
 ### wire format でのシリアライズ / パース
 
