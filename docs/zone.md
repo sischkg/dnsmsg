@@ -141,9 +141,9 @@ func (z Zone) Sign(signer crypto.Signer, algorithm uint8, keyTag uint16, signerN
 
 | 引数 | 型 | 内容 |
 |------|----|------|
-| `signer` | `crypto.Signer` | 秘密鍵（*rsa.PrivateKey や *ecdsa.PrivateKey など） |
+| `signer` | `crypto.Signer` | 秘密鍵（*rsa.PrivateKey や *ecdsa.PrivateKey など。`dnssec-keygen` の鍵からは `NewDNSSECSigner` で変換） |
 | `algorithm` | `uint8` | DNSSEC アルゴリズム番号（`SupportedDNSSECAlgorithms()` 参照） |
-| `keyTag` | `uint16` | 署名鍵の DNSKEY キータグ |
+| `keyTag` | `uint16` | 署名鍵の DNSKEY キータグ（`(*DNSSECKey).KeyTag` などで計算、[dnssec.md](dnssec.md) 参照） |
 | `signerName` | `DomainName` | 署名鍵のオーナー名（DNSKEY レコードのオーナー） |
 | `inception` | `uint32` | 署名開始時刻（Unix秒、0なら現在時刻） |
 | `expiration` | `uint32` | 署名有効期限（Unix秒、0なら無期限） |
@@ -233,9 +233,9 @@ func (z Zone) SignNSEC3(signer crypto.Signer, algorithm uint8, keyTag uint16, si
 
 | 引数 | 型 | 内容 |
 |------|----|------|
-| `signer` | `crypto.Signer` | 秘密鍵（*rsa.PrivateKey や *ecdsa.PrivateKey など） |
+| `signer` | `crypto.Signer` | 秘密鍵（*rsa.PrivateKey や *ecdsa.PrivateKey など。`dnssec-keygen` の鍵からは `NewDNSSECSigner` で変換） |
 | `algorithm` | `uint8` | DNSSEC アルゴリズム番号（`SupportedDNSSECAlgorithms()` 参照） |
-| `keyTag` | `uint16` | 署名鍵の DNSKEY キータグ |
+| `keyTag` | `uint16` | 署名鍵の DNSKEY キータグ（`(*DNSSECKey).KeyTag` などで計算、[dnssec.md](dnssec.md) 参照） |
 | `signerName` | `DomainName` | 署名鍵のオーナー名（DNSKEY レコードのオーナー） |
 | `inception` | `uint32` | 署名開始時刻（Unix秒、0なら現在時刻） |
 | `expiration` | `uint32` | 署名有効期限（Unix秒、0なら無期限） |

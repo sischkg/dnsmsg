@@ -30,7 +30,11 @@ RRSIG の署名検証をサポートします。ワイルドカードのドメ�
 | `(*RRSet).String() string` | 人間が読める形式で返す |
 | `(*RRSet).CanonicalWireFormat() []byte` | 正規ワイヤフォーマット（RFC 4034 Section 6.2）を返す |
 | `(*RRSet).AppendCanonicalWireFormat(w *WireFormat) uint32` | 正規ワイヤフォーマットを追記 |
-| `SignRRSet(rs *RRSet, signer crypto.Signer, algorithm uint8, keyTag uint16, signersName DomainName, inception, expiration uint32) (*RecordRRSIG, error)` | RRSet に署名して RRSIG を生成 |
+| `NewDNSSECSigner(key *DNSSECKey) (crypto.Signer, error)` | `dnssec-keygen` の `.private` 鍵を `SignRRSet` が使える `crypto.Signer` に変換（[dnssec.md](dnssec.md)） |
+| `DNSSECKeyTag(rdata []byte) uint16` | DNSKEY RDATA（RFC 4034 Appendix B のアルゴリズム）でキータグを計算 |
+| `(RecordDNSKEY).KeyTag() uint16` | DNSKEY レコードのキータグ |
+| `(*DNSSECKey).KeyTag() (uint16, error)` | 鍵ファイルから読み込んだ鍵のキータグ（公開鍵がない場合はエラー） |
+| `SignRRSet(rs *RRSet, signer crypto.Signer, algorithm uint8, keyTag uint16, signerName DomainName, inception, expiration uint32) (*RecordRRSIG, error)` | RRSet に署名して RRSIG を生成 |
 | `VerifyRRSet(rs *RRSet, rrsig *RecordRRSIG, pubkey crypto.PublicKey, now time.Time) error` | RRSIG の署名を検証 |
 | `VerifyRRSetWithDNSKEY(rs *RRSet, rrsig *RecordRRSIG, dnskey *RecordDNSKEY, now time.Time) error` | DNSKEY レコードから公開鍵を読み取り検証 |
 | `SupportedDNSSECAlgorithms() []uint8` | 署名・検証に対応するアルゴリズム一覧 |
@@ -97,6 +101,19 @@ RRSet を秘密鍵で署名し、RRSIG レコードを生成します。
 `OrigTTL`（`rs.TTL`）、`KeyTag`、`SignerName`、`Inception`、`Expiration`、`Signature` が設定されます。
 
 署名データは `rs.CanonicalWireFormat()`（正規ワイヤフォーマット）に対して計算されます。
+
+### 署名鍵とキータグの準備
+
+`signer` として `crypto.Signer` を用意します。`dnssec-keygen` の `.private` ファイルから
+鍵を読み込んだ場合は `NewDNSSECSigner` を使うと、RSA・ECDSA・Ed25519 の秘密鍵を
+`SignRRSet` が受け付ける `crypto.Signer` に変換します。
+
+`keyTag` は署名鍵の DNSKEY キータグ（RFC 4034 Appendix B）です。同じ鍵の公開鍵マテリアルから
+`DNSSECKeyTag`（DNSKEY の RDATA を渡す）、`(RecordDNSKEY).KeyTag`（DNSKEY レコードから）、
+`(*DNSSECKey).KeyTag`（鍵ファイルから読み込んだ鍵から）のいずれかで計算できます。
+`.private` には公開鍵が含まれないため、`(*DNSSECKey).KeyTag` を使う場合は同じ接頭辞の
+`.key` ファイルも読んで `PublicKey` に設定してください（詳細は [dnssec.md](dnssec.md) の
+「署名鍵の構築」「DNSKEY のキータグ」）。
 
 ### ワイルドカードの RRSet に署名する
 
@@ -248,20 +265,48 @@ for _, alg := range dnsmsg.SupportedDNSSECAlgorithms() {
 
 ### 4) dnssec-keygen の鍵ファイルを読み込んで署名する
 
+`.private` ファイルは `NewDNSSECSigner` で `crypto.Signer` に変換し、キータグは同じ鍵の `.key`（公開鍵）から計算します。公開鍵を `PublicKey` に合わせておくと、`NewDNSSECSigner` が秘密鍵から導出した公開鍵と DNSKEY の公開鍵が同じかどうか検査します。
+
 ```go
-// .key ファイルから公開鍵情報を読み込む
-key, err := dnsmsg.ReadKeyFile("Kexample.com.+008+12345.key")
+base := "Kexample.com.+008+12345"
+
+private, err := dnsmsg.ReadPrivateKeyFile(base + ".private")
 if err != nil {
-    log.Fatal(err)
+	log.Fatal(err)
+}
+keyFile, err := dnsmsg.ReadKeyFile(base + ".key")
+if err != nil {
+	log.Fatal(err)
+}
+private.PublicKey = keyFile.PublicKey
+
+signer, err := dnsmsg.NewDNSSECSigner(private) // crypto.Signer
+if err != nil {
+	log.Fatal(err)
+}
+keyTag, err := private.KeyTag()
+if err != nil {
+	log.Fatal(err)
 }
 
-// signer は crypto.Signer を実装する秘密鍵（dnssec-keygen の .private ファイルから
-// 復元した鍵など）
-// signer := ...
+name, _ := dnsmsg.NewDomainNameFromString("example.com.")
+inception, expiration := uint32(1700000000), uint32(1800000100)
 
-rs := dnsmsg.NewRRSet(...)
-rrsig, err := dnsmsg.SignRRSet(&rs, signer, key.Algorithm, keyTag, key.Name, inception, expiration)
+rs := dnsmsg.NewRRSet(
+	name,
+	dnsmsg.CLASS_IN,
+	dnsmsg.TYPE_A,
+	3600,
+	dnsmsg.NewRecordA([4]byte{192, 0, 2, 1}),
+)
+
+rrsig, err := dnsmsg.SignRRSet(&rs, signer, private.Algorithm, keyTag, name, inception, expiration)
+if err != nil {
+	log.Fatal(err)
+}
 ```
+
+`.key` だけでは署名できません（秘密鍵がないため `NewDNSSECSigner` は `DNSSEC key ... has no private key material: read the .private file` を返します）。同じ鍵で生成した RRSIG の検証は `VerifyRRSetWithDNSKEY` を使ってください。鍵ファイル読み取りの詳細は [dnssec.md](dnssec.md) の使用例 4 を参照してください。
 
 ## エラーハンドリング
 
@@ -271,13 +316,16 @@ rrsig, err := dnsmsg.SignRRSet(&rs, signer, key.Algorithm, keyTag, key.Name, inc
 | `signer` が nil | `signer is nil` |
 | 非対応アルゴリズム | `unsupported DNSSEC algorithm N for signing` |
 | 署名失敗 | `cannot sign RRSet: <原因>` |
+| `NewDNSSECSigner` での鍵構築失敗 | `DNSSEC key <name> has no private key material: ...` など（[dnssec.md](dnssec.md) のエラーハンドリング） |
+| `(*DNSSECKey).KeyTag` が公開鍵なしで呼ばれた | `cannot compute the key tag of DNSSEC key <name>: no public key material` |
 
 ## 補足
 
 - `SignRRSet` は `crypto.Signer` を受け取るため、`crypto/rsa` や `crypto/ecdsa` の秘密鍵をそのまま渡せます。
 - `crypto/rsa` や `crypto/ecdsa` の `Sign` は `crypto.SHA256` などの `crypto.SignerOpts` を受け取るとデータを「すでにハッシュ済み」とみなすため、`SignRRSet` の内部で RRSet の正規ワイヤフォーマットをハッシュしてから署名します。呼び出し側は生の `[]byte` データを渡す必要はありません。
 - Ed25519（アルゴリズム 15）はハッシュを指定しないアルゴリズムで、生データに対して署名されます。
-- 鍵ファイルの読み込み（`.key` / `.private`）については [dnssec.md](dnssec.md) を参照してください。
+- 鍵ファイルの読み込み（`.key` / `.private`）、`NewDNSSECSigner` による `crypto.Signer` への変換、
+  DNSKEY キータグの計算については [dnssec.md](dnssec.md) を参照してください。
 - 署名検証は [zone.md](zone.md) の `Zone.Sign` で生成した RRSIG にもそのまま使えます。
   署名時と同じオーナー名（ワイルドカードは展開前の名前）で検証してください。
 

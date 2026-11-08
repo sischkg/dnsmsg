@@ -30,6 +30,9 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
   - `ReadKeyFile` で `.key` ファイル（公開鍵 / DNSKEY レコード）を読み込む
   - `ReadPrivateKeyFile` で `.private` ファイル（秘密鍵 / Private-key-format v1.3）を読み込む
   - `DNSSECKey.ToDNSKEY()` で `RecordDNSKEY` に変換
+  - `NewDNSSECPublicKey` で DNSKEY の公開鍵マテリアルから `crypto.PublicKey` を構築
+  - `NewDNSSECSigner` で `.private` の秘密鍵を `crypto.Signer` に変換（`SignRRSet` などで使用）
+  - `DNSSECKeyTag` / `(RecordDNSKEY).KeyTag` / `(*DNSSECKey).KeyTag` で DNSKEY キータグを計算
 - RRSet と DNSSEC 署名（`docs/rrset.md`）:
   - `RRSet` 構造体と正規ワイヤフォーマット（RFC 4034 Section 6.2）
   - `SignRRSet` で RRSet に署名し RRSIG レコードを生成
@@ -76,8 +79,8 @@ Go ライブラリです。外部依存を持たず、標準ライブラリの�
 | ファイル | 内容 |
 |----------|------|
 | [index.md](index.md) | 本ページ。パッケージの概要、クイックスタート、主要な型の一覧 |
-| [dnssec.md](dnssec.md) | DNSSEC 鍵ファイル（BIND dnssec-keygen 生成）の読み込み（`.key` / `.private`） |
-| [rrset.md](rrset.md) | RRSet と DNSSEC 署名（正規ワイヤフォーマット、SignRRSet、SupportedDNSSECAlgorithms） |
+| [dnssec.md](dnssec.md) | DNSSEC 鍵ファイル（BIND dnssec-keygen 生成）の読み込み（`.key` / `.private`）、公開鍵・署名鍵の構築（NewDNSSECPublicKey / NewDNSSECSigner）、DNSKEY キータグの計算 |
+| [rrset.md](rrset.md) | RRSet と DNSSEC 署名（正規ワイヤフォーマット、SignRRSet、署名鍵とキータグの準備、SupportedDNSSECAlgorithms） |
 | [zone.md](zone.md) | DNS ゾーン管理（Zone 構造体、RRSet コレクション、ResourceRecordsToZone） |
 | [edns.md](edns.md) | EDNS(0) / OPT レコード、EDNS option（DO・NSID・EDE・生データ）、カスタムパーサの登録 |
 | [record-cname.md](record-cname.md) | CNAME レコード（RFC 1035） |
