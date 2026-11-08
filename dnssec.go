@@ -1,6 +1,7 @@
 package dnsmsg
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
@@ -50,6 +51,52 @@ type DNSSECKey struct {
 // zone file.  The private key material is not part of the DNSKEY record.
 func (k *DNSSECKey) ToDNSKEY() RecordDNSKEY {
 	return NewRecordDNSKEY(k.Flags, k.Protocol, k.Algorithm, k.PublicKey)
+}
+
+// DNSSECKeyTag computes the key tag of DNSKEY RDATA (RFC 4034 Appendix B,
+// RFC 4034 Section 5.1.1).  The rdata argument is the RDATA of a DNSKEY
+// record - flags, protocol, algorithm and public key, and nothing else - as
+// produced by RecordDNSKEY.CanonicalWireFormat.
+//
+// The octets are treated as big-endian 16-bit words which are summed; a
+// trailing octet that does not form a complete word is the high-order byte
+// of the last word.  The carry of that sum is added back in and the low
+// 16 bits are returned.
+func DNSSECKeyTag(rdata []byte) uint16 {
+	var ac uint32
+	for i, b := range rdata {
+		if i&1 == 0 {
+			ac += uint32(b) << 8
+		} else {
+			ac += uint32(b)
+		}
+	}
+	ac += ac >> 16
+	return uint16(ac & 0xffff)
+}
+
+// KeyTag returns the key tag of the DNSKEY record, computed over its RDATA
+// by DNSSECKeyTag.  This is the value the KeyTag field of an RRSIG made by
+// this key carries (RFC 4034 Section 3.1.1), so a verifier can match
+// RecordRRSIG.KeyTag to the DNSKEY that produced the signature.
+func (r RecordDNSKEY) KeyTag() uint16 {
+	return DNSSECKeyTag(r.CanonicalWireFormat())
+}
+
+// KeyTag returns the key tag of the DNSKEY record this key corresponds to,
+// which is the key tag to pass to SignRRSet and the value the KeyTag field
+// of the RRSIGs it creates carries.  An error is returned when the key
+// carries no public key material, as a key read from a .private file alone
+// does: the tag of such a key would be the sum of the four octets of flags,
+// protocol and algorithm, which looks like a key tag but is not one.
+func (k *DNSSECKey) KeyTag() (uint16, error) {
+	if k == nil {
+		return 0, fmt.Errorf("DNSSEC key is nil")
+	}
+	if len(k.PublicKey) == 0 {
+		return 0, fmt.Errorf("cannot compute the key tag of DNSSEC key %s: no public key material", k.Name)
+	}
+	return k.ToDNSKEY().KeyTag(), nil
 }
 
 // ReadKeyFile reads a dnssec-keygen .key file and returns the DNSSEC key it
@@ -238,6 +285,97 @@ func strconvParseUint8(s, field string) (uint8, error) {
 		return 0, fmt.Errorf("invalid %s %q: %w", field, s, err)
 	}
 	return uint8(n), nil
+}
+
+// DNSSECAlgorithm is a DNSSEC algorithm number, as it appears in the
+// Algorithm field of a DNSKEY record, the Algorithm field of an RRSIG
+// record, the "Algorithm:" line of a .private key file, and the
+// <algorithm> field of a dnssec-keygen file name (RFC 4034 Section 5.1.1,
+// RFC 5702, RFC 6605, RFC 8078, RFC 8624, IANA "DNSSEC Algorithm
+// Numbers").
+//
+// It is a distinct type only so that the algorithm names are written down
+// once with String; every DNSSEC field of this library keeps holding a
+// plain uint8, and the constants convert to it without a cast being needed
+// at the call site of a function that takes one.
+type DNSSECAlgorithm uint8
+
+const (
+	// DNSSECAlgorithmRSAMD5 is algorithm 1, RSA/MD5 (RFC 2535).  Named for
+	// completeness: this library does not sign with it.
+	DNSSECAlgorithmRSAMD5 DNSSECAlgorithm = 1
+	// DNSSECAlgorithmDH is algorithm 2, Diffie-Hellman key agreement
+	// (RFC 2535), which has no private key to sign with.
+	DNSSECAlgorithmDH DNSSECAlgorithm = 2
+	// DNSSECAlgorithmDSA is algorithm 3, DSA/SHA1 (RFC 2535).
+	DNSSECAlgorithmDSA DNSSECAlgorithm = 3
+	// DNSSECAlgorithmECC is algorithm 4, ECC (RFC 2535), which the registry
+	// names but no format defines.
+	DNSSECAlgorithmECC DNSSECAlgorithm = 4
+	// DNSSECAlgorithmRSASHA1 is algorithm 5, RSA/SHA-1 (RFC 3110).
+	DNSSECAlgorithmRSASHA1 DNSSECAlgorithm = 5
+	// DNSSECAlgorithmDSANSEC3SHA1 is algorithm 6, DSA-NSEC3-SHA1 (RFC 5155).
+	DNSSECAlgorithmDSANSEC3SHA1 DNSSECAlgorithm = 6
+	// DNSSECAlgorithmRSASHA1NSEC3SHA1 is algorithm 7, RSASHA1-NSEC3-SHA1
+	// (RFC 5155).
+	DNSSECAlgorithmRSASHA1NSEC3SHA1 DNSSECAlgorithm = 7
+	// DNSSECAlgorithmRSASHA256 is algorithm 8, RSA/SHA-256 (RFC 5702).
+	DNSSECAlgorithmRSASHA256 DNSSECAlgorithm = 8
+	// DNSSECAlgorithmRSASHA512 is algorithm 10, RSA/SHA-512 (RFC 5702).
+	DNSSECAlgorithmRSASHA512 DNSSECAlgorithm = 10
+	// DNSSECAlgorithmECCGOST is algorithm 12, ECC/GOST (RFC 5702).
+	DNSSECAlgorithmECCGOST DNSSECAlgorithm = 12
+	// DNSSECAlgorithmECDSAP256SHA256 is algorithm 13, ECDSA with a
+	// P-256 curve (RFC 6605).
+	DNSSECAlgorithmECDSAP256SHA256 DNSSECAlgorithm = 13
+	// DNSSECAlgorithmECDSAP384SHA384 is algorithm 14, ECDSA with a P-384
+	// curve (RFC 6605).
+	DNSSECAlgorithmECDSAP384SHA384 DNSSECAlgorithm = 14
+	// DNSSECAlgorithmED25519 is algorithm 15, Ed25519 (RFC 8078).
+	DNSSECAlgorithmED25519 DNSSECAlgorithm = 15
+	// DNSSECAlgorithmED448 is algorithm 16, Ed448 (RFC 8078).
+	DNSSECAlgorithmED448 DNSSECAlgorithm = 16
+)
+
+// String returns the algorithm's name: the spelling "dnssec-keygen -a" and
+// the BIND configuration accept for it (NSEC3RSASHA1 for algorithm 7,
+// NSEC3DSA for algorithm 6), which is what a caller that builds a
+// "K<name>.+<algorithm>.+<keytag>" file name or names a key for a tool
+// needs.  An algorithm number that is not one of the constants is reported
+// as "ALGORITHM<digits>", in the form ResourceType and ResourceClass
+// report an unregistered number.
+func (a DNSSECAlgorithm) String() string {
+	switch a {
+	case DNSSECAlgorithmRSAMD5:
+		return "RSAMD5"
+	case DNSSECAlgorithmDH:
+		return "DH"
+	case DNSSECAlgorithmDSA:
+		return "DSA"
+	case DNSSECAlgorithmECC:
+		return "ECC"
+	case DNSSECAlgorithmRSASHA1:
+		return "RSASHA1"
+	case DNSSECAlgorithmDSANSEC3SHA1:
+		return "NSEC3DSA"
+	case DNSSECAlgorithmRSASHA1NSEC3SHA1:
+		return "NSEC3RSASHA1"
+	case DNSSECAlgorithmRSASHA256:
+		return "RSASHA256"
+	case DNSSECAlgorithmRSASHA512:
+		return "RSASHA512"
+	case DNSSECAlgorithmECCGOST:
+		return "ECC-GOST"
+	case DNSSECAlgorithmECDSAP256SHA256:
+		return "ECDSAP256SHA256"
+	case DNSSECAlgorithmECDSAP384SHA384:
+		return "ECDSAP384SHA384"
+	case DNSSECAlgorithmED25519:
+		return "ED25519"
+	case DNSSECAlgorithmED448:
+		return "ED448"
+	}
+	return fmt.Sprintf("ALGORITHM%d", uint8(a))
 }
 
 // dnssecAlgorithmHash returns the hash function used by the given DNSSEC
@@ -639,6 +777,250 @@ func verifyDNSSECSignature(algorithm uint8, pubkey crypto.PublicKey, signData, s
 	}
 
 	return fmt.Errorf("unsupported DNSSEC algorithm %d for verification", algorithm)
+}
+
+// NewDNSSECSigner converts the private key material of a DNSSEC key, as read
+// from a .private file by ReadPrivateKeyFile, into the crypto.Signer to pass
+// to SignRRSet: *rsa.PrivateKey for the RSA algorithms, *ecdsa.PrivateKey on
+// P-256 or P-384 for the ECDSA algorithms and ed25519.PrivateKey for
+// Ed25519.  The signer carries no hashing wrapper: SignRRSet hashes the
+// canonical RRset itself and passes the matching crypto.SignerOpts.
+//
+// The named private key parameters are those dnssec-keygen writes (RFC 4034
+// Appendix D): "Modulus", "PublicExponent", "PrivateExponent", "Prime1" and
+// "Prime2" for RSA, and a single "PrivateKey" private scalar for ECDSA and
+// Ed25519.  ReadPrivateKeyFile mirrors "PrivateExponent" and the "PrivateKey"
+// scalar into DNSSECKey.PrivateKey, so either spelling is accepted; the RSA
+// primes are only read from the named parameters, because a single byte string
+// cannot hold two integers.  A key read from a .key file alone carries
+// no private material and is rejected, as are algorithm numbers this package
+// cannot sign with (see SupportedDNSSECAlgorithms), private parameters of the
+// wrong length, and private material which does not correspond to the public
+// key the key also carries.
+func NewDNSSECSigner(key *DNSSECKey) (crypto.Signer, error) {
+	if key == nil {
+		return nil, fmt.Errorf("DNSSEC key is nil")
+	}
+	if len(key.PrivateKey) == 0 && len(key.PrivateParams) == 0 {
+		return nil, fmt.Errorf("DNSSEC key %s has no private key material: read the .private file", key.Name)
+	}
+
+	switch key.Algorithm {
+	case 5, 7, 8, 10: // RSASHA1, RSASHA1-NSEC3-SHA1, RSASHA256, RSASHA512
+		return dnssecRSASigner(key)
+	case 13, 14: // ECDSAP256SHA256, ECDSAP384SHA384
+		curve := elliptic.P256()
+		if key.Algorithm == 14 {
+			curve = elliptic.P384()
+		}
+		return dnssecECDSASigner(key, curve)
+	case 15: // ED25519
+		return dnssecEd25519Signer(key)
+	}
+
+	return nil, fmt.Errorf("unsupported DNSSEC algorithm %d for signing", key.Algorithm)
+}
+
+// dnssecRSASigner builds an *rsa.PrivateKey from the RSA private key
+// parameters of a .private file (RFC 4034 Appendix D).
+func dnssecRSASigner(key *DNSSECKey) (*rsa.PrivateKey, error) {
+	var (
+		modulus         = dnssecPrivateKeyParam(key, "Modulus")
+		publicExponent  = dnssecPrivateKeyParam(key, "PublicExponent")
+		privateExponent = dnssecPrivateKeyParam(key, "PrivateExponent")
+		prime1          = dnssecPrivateKeyParam(key, "Prime1")
+		prime2          = dnssecPrivateKeyParam(key, "Prime2")
+	)
+	for _, param := range []struct {
+		name  string
+		value []byte
+	}{
+		{"Modulus", modulus},
+		{"PublicExponent", publicExponent},
+		{"PrivateExponent", privateExponent},
+	} {
+		if len(param.value) == 0 {
+			return nil, fmt.Errorf("DNSSEC key %s has no RSA private key parameter %q", key.Name, param.name)
+		}
+	}
+	if (len(prime1) == 0) != (len(prime2) == 0) {
+		return nil, fmt.Errorf("DNSSEC key %s has no RSA private key parameter %q", key.Name, "Prime1 and Prime2")
+	}
+
+	e := new(big.Int).SetBytes(publicExponent)
+	if e.Cmp(big.NewInt(2)) < 0 || e.BitLen() > 31 {
+		// The same range rsa.checkPub applies, so that a key which cannot be used
+		// is reported here rather than from inside a signature.
+		return nil, fmt.Errorf("invalid RSA public exponent in DNSSEC key %s: it must be at least 2 and less than 2^31", key.Name)
+	}
+
+	priv := &rsa.PrivateKey{
+		PublicKey: rsa.PublicKey{
+			N: new(big.Int).SetBytes(modulus),
+			E: int(e.Int64()),
+		},
+		D: new(big.Int).SetBytes(privateExponent),
+	}
+
+	if len(prime1) > 0 {
+		priv.Primes = []*big.Int{new(big.Int).SetBytes(prime1), new(big.Int).SetBytes(prime2)}
+		// "Exponent1", "Exponent2" and "Coefficient" are the same values
+		// rsa.PrivateKey.Precompute derives from the primes and D, so they are not
+		// read: Precompute stops as soon as it finds a CRT value already set, and
+		// deriving them here keeps a wrong value in a file from being trusted.
+		if err := priv.Validate(); err != nil {
+			return nil, fmt.Errorf("invalid RSA private key in DNSSEC key %s: %w", key.Name, err)
+		}
+		// SignRRSet signs with this key many times over; the CRT values are worth
+		// computing once here.  Precompute comes after Validate because it trusts
+		// what it is given.
+		priv.Precompute()
+	} else if err := checkDNSSECRSAKeyWithoutPrimes(priv); err != nil {
+		// rsa.Validate compares N with the product of Primes, so a key that
+		// carries no primes fails it even when N, E and D are consistent.  Check
+		// the three numbers against each other instead; rsa.PrivateKey.Sign then
+		// takes its general path, which only needs N, E and D.
+		return nil, fmt.Errorf("invalid RSA private key in DNSSEC key %s: %s", key.Name, err)
+	}
+
+	if err := dnssecPublicKeyMatches(key, &priv.PublicKey); err != nil {
+		return nil, err
+	}
+	return priv, nil
+}
+
+// checkDNSSECRSAKeyWithoutPrimes reports whether the modulus, public exponent and
+// private exponent of an RSA key are usable on their own, without the prime
+// factors: the range checks crypto/rsa applies to a public key, an odd modulus
+// (rsa builds a bigmod.Modulus from it when signing, which rejects an even one),
+// plus a private exponent which is neither 0 nor as large as the modulus.  The
+// public exponent is already known to be at least 2 and below 2^31 when this is
+// called, so only its size relative to the modulus is checked here.
+func checkDNSSECRSAKeyWithoutPrimes(priv *rsa.PrivateKey) error {
+	if priv.N == nil || priv.N.Cmp(big.NewInt(2)) < 0 {
+		return fmt.Errorf("the modulus must be at least 3")
+	}
+	if priv.N.Bit(0) == 0 {
+		return fmt.Errorf("the modulus must be odd")
+	}
+	if big.NewInt(int64(priv.E)).Cmp(priv.N) >= 0 {
+		return fmt.Errorf("the public exponent must be smaller than the modulus")
+	}
+	if priv.D.Sign() <= 0 || priv.D.Cmp(priv.N) >= 0 {
+		return fmt.Errorf("the private exponent must be greater than 0 and smaller than the modulus")
+	}
+	return nil
+}
+
+// dnssecECDSASigner builds an *ecdsa.PrivateKey from the private scalar a
+// .private file carries for the given curve, and derives the public point
+// from it (RFC 6605).
+func dnssecECDSASigner(key *DNSSECKey, curve elliptic.Curve) (*ecdsa.PrivateKey, error) {
+	scalar := dnssecPrivateKeyParam(key, "PrivateKey", "PrivateScalar")
+	size := (curve.Params().N.BitLen() + 7) / 8
+	if len(scalar) == 0 {
+		return nil, fmt.Errorf("DNSSEC key %s has no ECDSA private key parameter %q", key.Name, "PrivateKey")
+	}
+	if len(scalar) != size {
+		return nil, fmt.Errorf("invalid ECDSA private key in DNSSEC key %s: the private scalar must be %d octets, got %d", key.Name, size, len(scalar))
+	}
+
+	d := new(big.Int).SetBytes(scalar)
+	if d.Sign() == 0 || d.Cmp(curve.Params().N) >= 0 {
+		return nil, fmt.Errorf("invalid ECDSA private scalar in DNSSEC key %s: it must be greater than 0 and less than the curve order", key.Name)
+	}
+
+	x, y := curve.ScalarBaseMult(scalar)
+	priv := &ecdsa.PrivateKey{
+		PublicKey: ecdsa.PublicKey{Curve: curve, X: x, Y: y},
+		D:         d,
+	}
+	if err := dnssecPublicKeyMatches(key, &priv.PublicKey); err != nil {
+		return nil, err
+	}
+	return priv, nil
+}
+
+// dnssecEd25519Signer builds an ed25519.PrivateKey from the 32-octet seed a
+// .private file carries (RFC 8080).
+func dnssecEd25519Signer(key *DNSSECKey) (ed25519.PrivateKey, error) {
+	seed := dnssecPrivateKeyParam(key, "PrivateKey")
+	if len(seed) == 0 {
+		return nil, fmt.Errorf("DNSSEC key %s has no Ed25519 private key parameter %q", key.Name, "PrivateKey")
+	}
+	if len(seed) != ed25519.SeedSize {
+		return nil, fmt.Errorf("invalid Ed25519 private key in DNSSEC key %s: the seed must be %d octets, got %d", key.Name, ed25519.SeedSize, len(seed))
+	}
+
+	priv := ed25519.NewKeyFromSeed(seed)
+	if err := dnssecPublicKeyMatches(key, priv.Public()); err != nil {
+		return nil, err
+	}
+	return priv, nil
+}
+
+// dnssecPrivateKeyParam returns the decoded octets of the first named private
+// key parameter it finds in a DNSSEC key.  Parameter names are matched
+// case-insensitively because the spelling of the ECDSA and Ed25519 private
+// scalar varies between versions of BIND ("PrivateKey" and "Privatekey").
+// When no name matches, DNSSECKey.PrivateKey is returned: ReadPrivateKeyFile
+// mirrors the private exponent and the private scalar there, and a hand-built
+// key may carry its material there alone.
+func dnssecPrivateKeyParam(key *DNSSECKey, names ...string) []byte {
+	for _, name := range names {
+		for stored, value := range key.PrivateParams {
+			if strings.EqualFold(stored, name) {
+				return value
+			}
+		}
+	}
+	return key.PrivateKey
+}
+
+// dnssecPublicKeyMatches reports whether the public key derived from private
+// key material is the public key the DNSSEC key also carries, which is the
+// public key of the DNSKEY record its .key file holds.  A key with no public
+// key material (one read from a .private file alone) matches anything: there
+// is nothing to compare against.
+func dnssecPublicKeyMatches(key *DNSSECKey, derived crypto.PublicKey) error {
+	if len(key.PublicKey) == 0 {
+		return nil
+	}
+
+	switch want := derived.(type) {
+	case *rsa.PublicKey:
+		have, err := rsaPublicKeyFromDNSKEY(key.PublicKey)
+		if err != nil {
+			return fmt.Errorf("DNSSEC key %s: %w", key.Name, err)
+		}
+		if have.N.Cmp(want.N) != 0 || have.E != want.E {
+			return fmt.Errorf("DNSSEC key %s: its private key does not match its DNSKEY public key", key.Name)
+		}
+		return nil
+
+	case *ecdsa.PublicKey:
+		have, err := ecdsaPublicKeyFromDNSKEY(key.PublicKey, want.Curve)
+		if err != nil {
+			return fmt.Errorf("DNSSEC key %s: %w", key.Name, err)
+		}
+		if have.X.Cmp(want.X) != 0 || have.Y.Cmp(want.Y) != 0 {
+			return fmt.Errorf("DNSSEC key %s: its private key does not match its DNSKEY public key", key.Name)
+		}
+		return nil
+
+	case ed25519.PublicKey:
+		have, err := NewDNSSECPublicKey(key.Algorithm, key.PublicKey)
+		if err != nil {
+			return fmt.Errorf("DNSSEC key %s: %w", key.Name, err)
+		}
+		haveBytes, ok := have.(ed25519.PublicKey)
+		if !ok || !bytes.Equal(haveBytes, want) {
+			return fmt.Errorf("DNSSEC key %s: its private key does not match its DNSKEY public key", key.Name)
+		}
+		return nil
+	}
+
+	return fmt.Errorf("DNSSEC key %s: unexpected private key type %T", key.Name, derived)
 }
 
 // NewDNSSECPublicKey converts DNSKEY public key material (the Public Key
