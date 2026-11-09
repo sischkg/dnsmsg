@@ -22,6 +22,7 @@
 | `ReadPrivateKeyFile(filename string) (*DNSSECKey, error)` | `.private` ファイル（Private-key-format v1.3）を読み込み、アルゴリズム番号と秘密パラメータを抽出する |
 | `ReadDNSSECKeyPair(baseName string) (*DNSSECKey, error)` | 同一の接頭辞を持つ `.key` と `.private` を読み、1 つの `DNSSECKey` に統合する |
 | `ReadDNSSECKeyFiles(keyFile, privateFile string) (*DNSSECKey, error)` | 2 つのファイル名を直接指定して同じ統合を行う |
+| `MergeDNSSECKey(public, private *DNSSECKey) (*DNSSECKey, error)` | 公開鍵の半分と秘密鍵の半分を 1 つの `DNSSECKey` に統合する（ファイルは読まない。`ReadDNSSECKeyFiles` はこの統合の上にファイル名の情報を載せたもの） |
 | `(*DNSSECKey).ToDNSKEY() RecordDNSKEY` | 鍵を `RecordDNSKEY` に変換（公開鍵のみ。秘密鍵は DNSKEY レコードに含まれない） |
 | `NewDNSSECPublicKey(algorithm uint8, material []byte) (crypto.PublicKey, error)` | DNSKEY の公開鍵マテリアルから `crypto.PublicKey` を構築（`VerifyRRSet` の `pubkey` に渡せます） |
 | `NewDNSSECSigner(key *DNSSECKey) (crypto.Signer, error)` | 鍵ファイルから復元した秘密鍵を `crypto.Signer` に変換（`SignRRSet` の署名鍵として使えます） |
@@ -155,6 +156,125 @@ key, err := dnsmsg.ReadDNSSECKeyFiles(
 `cannot decode private key parameter "Name" in <path>` でエラーになります。
 所有者名と秘密鍵マテリアルの両方が必要なら、その 1 組を `ReadKeyFile` と
 `ReadPrivateKeyFile` で別々に読むのではなく `ReadDNSSECKeyPair` で読んでください。
+
+上記の「読み込み時の検証」で説明している秘密鍵と公開鍵の照合は、
+`MergeDNSSECKey` が行うものと同じです。ただし `MergeDNSSECKey` は秘密鍵マテリアルを
+要求するので、秘密鍵マテリアルが無い 1 組を受け取るのは鍵ペアを読む経路だけです。
+
+## 公開鍵と秘密鍵の統合（`MergeDNSSECKey`）
+
+```go
+func MergeDNSSECKey(public, private *DNSSECKey) (*DNSSECKey, error)
+```
+
+`ReadKeyFile` が返す鍵（公開鍵の半分）と `ReadPrivateKeyFile` が返す鍵（秘密鍵の半分）を、
+両方を持つ 1 つの鍵に統合します。統合した鍵はそのまま次の呼び出しに使えます。
+
+- `key.ToDNSKEY()` は `public` の DNSKEY レコードと同じ RDATA を返す
+- `key.KeyTag()` は公開鍵マテリアルがあるためエラーにならない
+- `NewDNSSECSigner(key)` は秘密鍵マテリアルから `crypto.Signer` を組み、導出した公開鍵を
+  `public` の公開鍵マテリアルと照合する
+- したがって `SignRRSet` の `keyTag` 引数には `key.KeyTag()` の値を渡せばよく、それは
+  `key.ToDNSKEY().KeyTag()` と一致する
+
+この関数はファイルを読みません。すでに 2 つの半分を持っている場合に使ってください。
+
+- `ReadKeyFile` と `ReadPrivateKeyFile` を別々に呼んだ（拡張子の解決や `.private` の
+  `Name:` 行の扱いを自分で決めたい場合を含む）
+- 鍵をメモリ内で組み立てた（テストの鍵、他の場所から復元した鍵）
+- 1 組の鍵を自分が生成した
+
+`ReadDNSSECKeyFiles` はこの統合と `Algorithm` の照合をそのまま行ったうえで、返すエラーに
+2 つのファイル名を添える関数です。ファイルを読むところから一括して行いたい場合は
+`ReadDNSSECKeyFiles` を使ってください。同じ 1 組に対して両者が返す鍵は同じです。
+
+### 統合が要求する 2 つの半分
+
+2 つの半分が 1 つの鍵を説明していることが条件です。
+
+| 条件 | 満たさない意味 |
+|------|----------------|
+| どちらの引数も `nil` でない | 半分そのものが無い |
+| `public` が公開鍵マテリアル（`PublicKey`）を持つ | `.private` だけ読んだ鍵はそれを持たない。統合後の鍵は説明すべき DNSKEY を持てない |
+| `private` が秘密鍵マテリアル（`PrivateKey` または `PrivateParams`）を持つ | `.key` だけ読んだ鍵はそれを持たない。統合後の鍵は署名できなくなる |
+| 両方の `Algorithm` が 0 ではなく、同じ値である | 0 はアルゴリズムをどこからも読んでいないことを意味し、値が違うなら 2 つの半分は 1 つの鍵を説明していない |
+
+`Algorithm` が 0 の `DNSSECKey` はアルゴリズムをどこからも読んでいない鍵です。0 は 2 つの値が
+食い違った結果ではなく欠落なので、不一致ではなく欠落として報告します。
+
+### どちらの半分がどのフィールドを出す
+
+| 供給する半分 | `DNSSECKey` のフィールド |
+|--------------|---------------------------|
+| `public` | `Name`（所有者名）、`Flags`、`Protocol`、`Algorithm`、`PublicKey` |
+| `private` | `PrivateKey`、`PrivateParams` |
+
+`Algorithm` は 2 つの半分が共通して持つ情報なので、照合したうえで `public` の値を使います。
+それ以外のフィールドはどちらか一方の半分だけが供給します。引数が持っていたそれ以外の情報は
+統合後の鍵には入りません。
+
+- `private` が持つ `Name`、`Flags`、`Protocol`、`PublicKey` は使わない
+- `public` が持つ秘密鍵マテリアルは使わない（秘密鍵は `private` 側から来る）
+
+### 統合は引数を変更しない
+
+返す鍵は `Name` のラベル、`PublicKey`、`PrivateKey`、`PrivateParams` の各値を複製して持ちます。
+
+- 引数は変更されない
+- 統合後の鍵を変更しても引数は変わらない
+- 同じ 1 組から 2 回統合した場合、返る 2 つの鍵は状態を共有しない
+
+`PublicKey`、`PrivateKey`、`PrivateParams` の各値が `nil` の場合は `nil` のまま引き継ぎます。
+`nil` は「その種類のマテリアルが無い」という `DNSSECKey` の表し方なので、空のスライスに
+置き換えません。`nil` ではないが長さ 0 のスライスは長さ 0 のまま複製します。
+`PrivateParams` が空（`nil` または要素数 0）の場合はマップ自体を作りません。
+
+### 統合時に行う検証
+
+統合した鍵のアルゴリズムが `SupportedDNSSECAlgorithms()` に含まれる場合は、統合のときに
+`NewDNSSECSigner` に渡せるかを確認します。秘密鍵マテリアルから導出した公開鍵が `public` の
+公開鍵マテリアルと一致しない 1 組は、ここで報告されます（署名の時点まで引っ張りません）。
+
+- アルゴリズムが `SupportedDNSSECAlgorithms()` に含まれない（1、2、3、6、12、16 など）場合は、
+  検証のために作るべき署名鍵が存在しないので、そのまま統合して返します。`KeyTag()` と
+  `ToDNSKEY()` はそのまま正しく使え、`NewDNSSECSigner` は署名しようとしたときに従来どおりの
+  エラーを報告します
+- 検証は署名を作りません。乱数は使いません
+- 秘密鍵マテリアルの要求が条件にあるため、ここで検証が飛ばされることはありません（鍵ペアを
+  読む経路にある「秘密鍵マテリアルが無ければ検証もしない」分岐は、この経路にはありません）
+
+### 2 つのファイルを別々に読んで統合する
+
+```go
+base := "Kexample.com.+013+39506"
+
+public, err := dnsmsg.ReadKeyFile(base + ".key")
+if err != nil {
+	log.Fatal(err)
+}
+private, err := dnsmsg.ReadPrivateKeyFile(base + ".private")
+if err != nil {
+	log.Fatal(err)
+}
+
+key, err := dnsmsg.MergeDNSSECKey(public, private)
+if err != nil {
+	log.Fatal(err)
+}
+
+signer, err := dnsmsg.NewDNSSECSigner(key)
+if err != nil {
+	log.Fatal(err)
+}
+
+tag, err := key.KeyTag()
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+`ReadDNSSECKeyPair` はこれと同じことに、2 つのファイル名の解決と `.private` の `Name:` 行の
+除去を足した関数です。
 
 ## 公開鍵の構築（`NewDNSSECPublicKey`）
 
@@ -357,13 +477,14 @@ import (
 )
 
 func main() {
-	// dnssec-keygen の同一接頭辞を持つ .private と .key を 1 つの鍵として読む
+	// dnssec-keygen が同じ接頭辞で生成した .private と .key を 1 つの鍵として読む
 	key, err := dnsmsg.ReadDNSSECKeyPair("Kexample.com.+013+39506")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// 公開鍵マテリアルが揃っているので NewDNSSECSigner は秘密鍵と照合する
+	// 公開鍵マテリアルも揃った鍵なので、NewDNSSECSigner は秘密鍵から導出した公開鍵を
+	// その公開鍵マテリアルと突き合わせる
 	signer, err := dnsmsg.NewDNSSECSigner(key)
 	if err != nil {
 		log.Fatal(err)
@@ -412,8 +533,7 @@ func main() {
 ```
 
 既存の `ReadKeyFile` / `ReadPrivateKeyFile` で 2 つのファイルを別々に読む場合は、
-`NewDNSSECSigner` が秘密鍵と照合できるように `.key` の公開鍵マテリアルを統合した鍵に
-設定してください。
+`MergeDNSSECKey` で 2 つの半分を 1 つの鍵に統合してください（「公開鍵と秘密鍵の統合」参照）。
 
 ```go
 base := "Kexample.com.+013+39506"
@@ -422,15 +542,22 @@ private, err := dnsmsg.ReadPrivateKeyFile(base + ".private")
 if err != nil {
 	log.Fatal(err)
 }
-keyFile, err := dnsmsg.ReadKeyFile(base + ".key")
+public, err := dnsmsg.ReadKeyFile(base + ".key")
 if err != nil {
 	log.Fatal(err)
 }
-private.PublicKey = keyFile.PublicKey
-private.Name = keyFile.Name
+key, err := dnsmsg.MergeDNSSECKey(public, private)
+if err != nil {
+	log.Fatal(err)
+}
 ```
 
-`ReadDNSSECKeyPair` はこの統合（と 2 つの `Algorithm` の照合）を代わりに行います。
+`key` は上記の `signer` と `tag` を得るための鍵です。`private.PublicKey = public.PublicKey`
+と `private.Name = public.Name` の 2 つの代入だけで同じ形の鍵を作ることもできますが、その場合は
+2 つのファイルの `Algorithm` が同じかどうかを確認せず、鍵が署名に使えるかどうかの確認も
+`NewDNSSECSigner` を呼ぶ時点まで引っ張ります。
+`ReadDNSSECKeyPair` は同じ統合と `Algorithm` の照合を 2 つのファイル名の解決といっしょに行う
+関数なので、ファイルから読むだけならそちらを使ってください。
 
 ## エラーハンドリング
 
@@ -460,10 +587,28 @@ private.Name = keyFile.Name
 | ケース | エラー内容 |
 |------|-----------|
 | どちらかのファイルが読めない | 上記の `ReadKeyFile` / `ReadPrivateKeyFile` と同じエラー（解決されたファイル名を含む） |
-| 2 つのファイルの `Algorithm` が違う | `DNSSEC key pair <key file> and <private file>: the key file uses algorithm <n> (<name>) but the private key file uses algorithm <n> (<name>)` |
+| 2 つのファイルの `Algorithm` が違う | `DNSSEC key pair <key file> and <private file>: the algorithms do not match, the public key uses algorithm <n> (<name>) and the private key uses algorithm <n> (<name>)` |
 | 統合後の鍵が署名に使えない | `DNSSEC key pair <key file> and <private file>: <NewDNSSECSigner のエラー>`（「読み込み時の検証」参照） |
 | 基底名が空 | `cannot read DNSSEC key pair: the base name is empty`、または拡張子だけのとき `cannot read DNSSEC key pair ".key": the base name is empty` |
 | 拡張子が小文字でつづられていない | `cannot read DNSSEC key pair <name>: the key file suffix is "<suffix>", which is not spelled in lower case` |
+
+`MergeDNSSECKey` が返すエラー:
+
+| ケース | エラー内容 |
+|------|-----------|
+| 公開鍵の引数が `nil` | `cannot merge DNSSEC key: the public key is nil` |
+| 秘密鍵の引数が `nil` | `cannot merge DNSSEC key: the private key is nil` |
+| 公開鍵側に公開鍵マテリアルがない | `cannot merge DNSSEC key: the public key carries no DNSKEY public key material, which is what a key read from a .private file has, so the merged key would have no DNSKEY to describe` |
+| 秘密鍵側に秘密鍵マテリアルがない | `cannot merge DNSSEC key: the private key carries no private key material, which is what a key read from a .key file has, so the merged key would have nothing to sign with` |
+| 公開鍵の `Algorithm` が 0 | `cannot merge DNSSEC key: the public key names no algorithm, so the merged key would have none` |
+| 秘密鍵の `Algorithm` が 0 | `cannot merge DNSSEC key: the private key names no algorithm, so the merged key would have none` |
+| 2 つの `Algorithm` が違う | `cannot merge DNSSEC key: the algorithms do not match, the public key uses algorithm <n> (<name>) and the private key uses algorithm <n> (<name>)` |
+| 統合できた鍵が署名に使えない | 前置きなしの `NewDNSSECSigner` のエラーそのまま（上記の表を参照） |
+
+前置き `cannot merge DNSSEC key: ` が付くのは 2 つの半分が統合を受けられない場合だけです。
+統合はできたがその鍵で署名できない場合（秘密鍵が公開鍵と対応しない、アルゴリズムが未対応など）の
+エラーは `NewDNSSECSigner` のそのままの文言で返ります。鍵ペアを読む経路は同じエラーに
+2 つのファイル名を添えます（`DNSSEC key pair <key file> and <private file>: ...`）。
 
 ## 補足
 
