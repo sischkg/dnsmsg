@@ -114,3 +114,36 @@ func NewDNSSECKeyFileNameFromString(path string) (DNSSECKeyFileName, error) {
 func NewDNSSECKeyBaseName(name DomainName, algorithm uint8, keyTag uint16) string {
 	return fmt.Sprintf("K%s+%03d+%05d", name.String(), algorithm, keyTag)
 }
+
+// InferDNSSECKeyNameFromFileName returns the DNSKEY owner name a
+// dnssec-keygen key file name records: the key name is in the file name, so
+// it is recoverable from the name of a ".private" file alone, which is the
+// file whose contents carry no Name field (see ReadPrivateKeyFile).  This is
+// a pure conversion over the file name and opens no file: the rules are the
+// ones NewDNSSECKeyFileNameFromString applies, so the input spelling may be a
+// full path or a bare file name, with or without a lower-case ".key" or
+// ".private" suffix.  A file name that does not follow the
+// "K<name>+<algorithm>+<key tag>" convention is an error that names the part
+// of the name that caused it: the inferred name is the one the file name
+// records, never a guess, and a caller that has an arbitrary file name
+// supplies the owner name itself instead.
+//
+// The result is the same DomainName NewDNSSECKeyFileNameFromString returns in
+// its Name field, which is also the owner name the same pair's ".key" file
+// declares in its Name line.  Assign it to DNSSECKey.Name to complete a key
+// read from a ".private" file, and MergeDNSSECKey can use it as the private
+// half's name without losing the public half's: MergeDNSSECKey ignores the
+// private half's Name, so a merged key can keep the name inferred from the
+// ".private" file name.
+//
+// Inferring the name is not the same as completing the key: Name is not part
+// of DNSKEY RDATA, so the key tag, the signer name of a signature made with
+// the key, and the key's match against RecordRRSIG records all depend on it,
+// and the public key material still comes only from the ".key" file.
+func InferDNSSECKeyNameFromFileName(path string) (DomainName, error) {
+	parsed, err := NewDNSSECKeyFileNameFromString(path)
+	if err != nil {
+		return DomainName{}, fmt.Errorf("cannot infer DNSSEC key name from %s: %w", path, err)
+	}
+	return parsed.Name, nil
+}

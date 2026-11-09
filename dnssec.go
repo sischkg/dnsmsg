@@ -23,9 +23,23 @@ import (
 // The .key file holds the public key material (flags, protocol, algorithm and
 // public key) which corresponds to a DNSKEY record.  The .private file holds
 // the private key material which is used to sign RRsets.
+//
+// The owner name and the public key material are recorded by the .key file
+// only: the BIND .private format has no field for either.  A key read from a
+// .private file alone therefore has an empty Name and an empty PublicKey;
+// InferDNSSECKeyNameFromFileName recovers the owner name from the file's own
+// name, which carries it too, and KeyTag and ToDNSKEY report the missing
+// public key material with an error.  ReadDNSSECKeyPair reads both files and
+// returns a key with both filled.
 type DNSSECKey struct {
 	// Name is the domain name the key is for (the owner name of the DNSKEY
 	// record).
+	//
+	// It is the Name line of the key's public half, so ReadKeyFile and
+	// ReadDNSSECKeyPair fill it and a key read from a .private file alone
+	// has it empty, because the .private file format has no Name field
+	// (ParseDNSSECPrivateKeyWithSource).  Use InferDNSSECKeyNameFromFileName
+	// on the file's own name to complete such a key.
 	Name DomainName
 	// Flags are the DNSKEY flags (256 = zone key, 257 = secure entry point).
 	Flags uint16
@@ -88,7 +102,11 @@ func (r RecordDNSKEY) KeyTag() uint16 {
 // of the RRSIGs it creates carries.  An error is returned when the key
 // carries no public key material, as a key read from a .private file alone
 // does: the tag of such a key would be the sum of the four octets of flags,
-// protocol and algorithm, which looks like a key tag but is not one.
+// protocol and algorithm, which looks like a key tag but is not one.  The key
+// tag dnssec-keygen computed for such a key is the <keytag> field of its
+// "K<name>+<algorithm>+<keytag>" file name, which NewDNSSECKeyFileNameFromString
+// reads and InferDNSSECKeyNameFromFileName reads the <name> field of; the
+// key pair's .key file is the source the tag is computed from.
 func (k *DNSSECKey) KeyTag() (uint16, error) {
 	if k == nil {
 		return 0, fmt.Errorf("DNSSEC key is nil")
@@ -117,7 +135,12 @@ func ReadKeyFile(filename string) (*DNSSECKey, error) {
 
 // ReadPrivateKeyFile reads a dnssec-keygen .private file and returns the
 // DNSSEC key it contains.  The private key material and parameters are
-// populated; the public key is not present in a .private file and is left nil.
+// populated; the public key is not present in a .private file and is left nil,
+// and neither is the owner name: the .private format has no Name field, so
+// the returned key's Name is empty even though the file's own name records
+// the owner name.  Pass that file name to InferDNSSECKeyNameFromFileName to
+// fill key.Name from it, or read the pair with ReadDNSSECKeyPair, which takes
+// the owner name from the .key file.
 func ReadPrivateKeyFile(filename string) (*DNSSECKey, error) {
 	data, err := os.ReadFile(filename)
 	if err != nil {
@@ -805,6 +828,13 @@ func verifyDNSSECSignature(algorithm uint8, pubkey crypto.PublicKey, signData, s
 // cannot sign with (see SupportedDNSSECAlgorithms), private parameters of the
 // wrong length, and private material which does not correspond to the public
 // key the key also carries.
+//
+// The errors name the key by key.Name, which ReadPrivateKeyFile leaves empty
+// because a .private file does not declare the owner name (see DNSSECKey).  A
+// caller that wants a rejected key named in its own error messages sets that
+// name from the file name with InferDNSSECKeyNameFromFileName before calling
+// this; the signer, and every decision this function makes, is unaffected by
+// it.
 func NewDNSSECSigner(key *DNSSECKey) (crypto.Signer, error) {
 	if key == nil {
 		return nil, fmt.Errorf("DNSSEC key is nil")

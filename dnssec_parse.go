@@ -54,11 +54,15 @@ func ParseDNSSECKeyWithSource(data []byte, source string) (*DNSSECKey, error) {
 // ParseDNSSECPrivateKey parses the contents of a dnssec-keygen .private file
 // (Private-key-format v1.3) from a byte slice and returns the DNSSEC key it
 // contains.  The private key material and parameters are populated; the public
-// key is not present in a .private file and is left nil.  This is the parse
-// of ReadPrivateKeyFile without the file read: like it, a .private file that
-// carries a "Name:" line is rejected, because a lone private key has nothing
-// to take the owner name from.  Empty or algorithm-free data is an error,
-// never a nil key without one.
+// key is not present in a .private file and is left nil, and the returned
+// key's Name is empty: the format carries no field that records the owner
+// name, which is why a .private file that does carry a "Name:" line is
+// rejected — a lone private key has nothing to take the owner name from.  The
+// owner name belongs to the file's own name instead, which
+// InferDNSSECKeyNameFromFileName reads, or to the key pair's .key file, which
+// ReadDNSSECKeyPair takes it from.  This is the parse of ReadPrivateKeyFile
+// without the file read.  Empty or algorithm-free data is an error, never a
+// nil key without one.
 func ParseDNSSECPrivateKey(data []byte) (*DNSSECKey, error) {
 	return ParseDNSSECPrivateKeyWithSource(data, "")
 }
