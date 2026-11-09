@@ -1,6 +1,6 @@
 # DNSSEC の鍵ファイル・署名鍵・キータグ（dnssec-keygen 鍵ファイル対応）
 
-`dnsmsg` パッケージでは、BIND に付属する `dnssec-keygen` で生成した DNSSEC 鍵ファイル（`.key` / `.private`）を読み込み、`DNSSECKey` 構造体として取得できます。読み込んだ鍵は `RecordDNSKEY` に変換してゾーンファイルに公開でき、`NewDNSSECSigner` で `crypto.Signer` に変換して `SignRRSet` の署名鍵にできます。`KeyTag` 系の API は RFC 4034 Appendix B の DNSKEY キータグを計算します。鍵の内容をファイルそのものではなくバイト列や `io.Reader` として受け取っている場合は、`ParseDNSSECKey` / `ReadDNSSECKey` 系の API で同じパース規則をファイルに触れずに適用できます。
+`dnsmsg` パッケージでは、BIND に付属する `dnssec-keygen` で生成した DNSSEC 鍵ファイル（`.key` / `.private`）を読み込み、`DNSSECKey` 構造体として取得できます。読み込んだ鍵は `RecordDNSKEY` に変換してゾーンファイルに公開でき、`NewDNSSECSigner` で `crypto.Signer` に変換して `SignRRSet` の署名鍵にできます。`KeyTag` 系の API は RFC 4034 Appendix B の DNSKEY キータグを計算します。鍵の内容をファイルそのものではなくバイト列や `io.Reader` として受け取っている場合は、`ParseDNSSECKey` / `ReadDNSSECKey` 系の API で同じパース規則をファイルに触れずに適用できます。ファイルを開かずに鍵ファイルの**名前**（`K<name>+<alg>+<tag>`）だけから所属ドメイン名・アルゴリズム・キータグを取り出すのは `NewDNSSECKeyFileNameFromString` の仕事です。
 
 ## `DNSSECKey` 構造体
 
@@ -36,6 +36,8 @@
 | `DNSSECKeyTag(rdata []byte) uint16` | DNSKEY RDATA（wire フォーマット）から RFC 4034 Appendix B のキータグを計算 |
 | `(r RecordDNSKEY).KeyTag() uint16` | `RecordDNSKEY` のキータグ（`CanonicalWireFormat()` に対して `DNSSECKeyTag` を適用） |
 | `(*DNSSECKey).KeyTag() (uint16, error)` | 鍵の公開鍵材料からキータグを計算。公開鍵がない場合はエラー |
+| `NewDNSSECKeyFileNameFromString(path string) (DNSSECKeyFileName, error)` | `dnssec-keygen` の鍵**ファイル名**から所属ドメイン名・アルゴリズム・キータグを解析する（ファイルは開かない） |
+| `NewDNSSECKeyBaseName(name DomainName, algorithm uint8, keyTag uint16) string` | 3 つの値から `dnssec-keygen` が鍵ファイルに付ける基底名 `K<name>+<alg>+<tag>` を生成する |
 
 ## キーファイル形式
 
@@ -490,6 +492,68 @@ fmt.Println(dnsmsg.DNSSECKeyTag(dnskey.CanonicalWireFormat())) // 生の RDATA �
 - 検証側が使う `VerifyRRSetWithDNSKEY` は渡された `RecordDNSKEY` をそのまま使い、アルゴリズムが RRSIG と違う場合だけエラーにします（`DNSKEY algorithm N does not match RRSIG algorithm M`）。複数の DNSKEY があるゾーンでどの鍵で検証するかを選ぶのは呼び出し側の仕事です。その判断には `RecordDNSKEY.KeyTag()` と `RecordRRSIG.KeyTag` を比較するのが定石です（RFC 4034 Section 3.1.1）。
 - `(*DNSSECKey).KeyTag()` が公開鍵のない鍵でエラーにするのは、flags・protocol・algorithm の 4 オクテットだけの合計は見た目はキータグですが実際のキータグではないためです。`.private` 単体の鍵でキータグが必要な場合は、同じ名前の `.key` ファイルの公開鍵を `PublicKey` に設定してから計算してください。その 1 組をまとめて読むには `ReadDNSSECKeyPair` を使います。
 
+## 鍵ファイル名の解析（`NewDNSSECKeyFileNameFromString` / `NewDNSSECKeyBaseName`）
+
+`dnssec-keygen` の鍵**ファイル名** `K<所有者名>+<アルゴリズム>+<キータグ>[.key|.private]` は、その鍵を識別する 3 つの値そのものに書き込まれています。`NewDNSSECKeyFileNameFromString` はファイルを開かずに名前だけを解析し、その 3 つの値を取り出します。ファイルの**内容**を読む `ReadKeyFile` / `ReadDNSSECKeyPair` とは別の仕事で、どのファイルを読むか・どの鍵かに対応するかを判断するのに使えます。
+
+```go
+func NewDNSSECKeyFileNameFromString(path string) (DNSSECKeyFileName, error)
+func NewDNSSECKeyBaseName(name DomainName, algorithm uint8, keyTag uint16) string
+```
+
+### `DNSSECKeyFileName` 構造体
+
+| フィールド | 型 | 内容 |
+|-----------|----|------|
+| `BaseName` | `string` | `.key` / `.private` 拡張子を除いた基底名。解析した名前のつづりのままです。`.key` または `.private` を足すとその鍵の 2 つのファイル名になり、`ReadDNSSECKeyPair` にそのまま渡せます |
+| `Name` | `DomainName` | 鍵の所有者名（ファイル名の 1 番目のフィールド）。ゾーン鍵のゾーン名です |
+| `Algorithm` | `uint8` | 鍵の DNSSEC アルゴリズム番号（2 番目のフィールド）。`DNSSECAlgorithm*` 定数と比較してください |
+| `KeyTag` | `uint16` | 鍵のキータグ（3 番目のフィールド）。`RecordDNSKEY.KeyTag()` の計算結果や `RecordRRSIG.KeyTag` と比較できます |
+
+### 受け付ける名前
+
+- フルパスでもファイル名だけでもかまいません（ディレクトリ部分は除かれます）
+- `.key` / `.private` 拡張子はあってもなくてもかまいません（除いたものが `BaseName` になります）
+- `K` の直後が「所有者名（プレゼンテーション形式）`+` アルゴリズム（10 進数）`+` キータグ（10 進数）」のちょうど 3 フィールド
+- 所有者名は `NewDomainNameFromString` と同じプレゼンテーション形式です。ルートゾーン用に生成された名前（`K.+013+43580`）も解析できます
+- アルゴリズムは 255 以下、キータグは 65535 以下。先頭の 0 ありはあってもなくてもかまいません（`Kexample.com.+8+1` も valid）
+- 拡張子は `.key` / `.private` が小文字でつづられている場合だけ除かれます。`.Key` のようなつづりはエラーです。どちらでもない拡張子（`.tar.gz` など）は除かれず、その中身がキータグ フィールドの解析時にエラーとして報告されます
+
+### 基底名の生成（`NewDNSSECKeyBaseName`）
+
+`NewDNSSECKeyBaseName` は 3 つの値から `dnssec-keygen` が鍵ファイルに付ける基底名を生成します。アルゴリズムを 3 桁、キータグを 5 桁の 0 埋めで書くのも `dnssec-keygen` と同じです。生成した基底名を `NewDNSSECKeyFileNameFromString` に戻すと同じ 3 つの値が得られます。
+
+2 つを組み合わせる典型は、読み込んだ鍵の内容がファイル名と一致しているかの確認です。
+
+```go
+// 名前 1 つから、鍵ペアの読み取りに渡す基底名と期待するキータグを得る
+kn, err := dnsmsg.NewDNSSECKeyFileNameFromString("keys/Kexample.com.+013+39506.key")
+if err != nil {
+	log.Fatal(err)
+}
+fmt.Println(kn.BaseName)  // "Kexample.com.+013+39506"
+fmt.Println(kn.Name)      // "example.com."
+fmt.Println(kn.Algorithm) // 13
+fmt.Println(kn.KeyTag)    // 39506
+
+// その名前が指す鍵ペアを読む
+key, err := dnsmsg.ReadDNSSECKeyPair(kn.BaseName)
+if err != nil {
+	log.Fatal(err)
+}
+
+// 鍵の内容から計算したキータグがファイル名のキータグと一致するか
+computed, err := key.KeyTag()
+if err != nil {
+	log.Fatal(err)
+}
+if computed != kn.KeyTag {
+	log.Fatalf("key %s: file name says key tag %d, the key computes %d", kn.BaseName, kn.KeyTag, computed)
+}
+```
+
+`NewDNSSECKeyFileNameFromString` の返すエラーは「エラーハンドリング」の対応表に掲載しています。
+
 ## 使用例
 
 ### 1) `.key` ファイルから公開鍵を読み込み、`RecordDNSKEY` に変換する
@@ -712,6 +776,19 @@ if err != nil {
 | 統合後の鍵が署名に使えない | `DNSSEC key pair <key file> and <private file>: <NewDNSSECSigner のエラー>`（「読み込み時の検証」参照） |
 | 基底名が空 | `cannot read DNSSEC key pair: the base name is empty`、または拡張子だけのとき `cannot read DNSSEC key pair ".key": the base name is empty` |
 | 拡張子が小文字でつづられていない | `cannot read DNSSEC key pair <name>: the key file suffix is "<suffix>", which is not spelled in lower case` |
+
+`NewDNSSECKeyFileNameFromString` が返すエラー（前置き `cannot parse DNSSEC key file name <path>: `。`<path>` は呼び出し側が渡した名前そのままです）:
+
+| ケース | エラー内容 |
+|------|-----------|
+| 入力が空 | `cannot parse DNSSEC key file name: the name is empty`（入力が空のときは名前を添えない） |
+| 入力か、除かれた後の名前が空 | `cannot parse DNSSEC key file name <path>: the name is empty`（`.key` だけの入力など） |
+| 拡張子が小文字でつづられていない | `cannot parse DNSSEC key file name <path>: the key file suffix is "<suffix>", which is not spelled in lower case` |
+| `K` で始まらない | `cannot parse DNSSEC key file name <path>: the name does not begin with "K"` |
+| `+` で区切られたフィールド数が 3 でない | `cannot parse DNSSEC key file name <path>: after the "K" prefix the name has <n> fields separated by "+", want 3: the owner name, the algorithm and the key tag` |
+| 所有者名が不正 | `cannot parse DNSSEC key file name <path>: owner name "<field>": <NewDomainNameFromString のエラー>` |
+| アルゴリズムが数値でないか 255 を超える | `cannot parse DNSSEC key file name <path>: algorithm "<field>": <strconv.ParseUint のエラー>` |
+| キータグが数値でないか 65535 を超える | `cannot parse DNSSEC key file name <path>: key tag "<field>": <strconv.ParseUint のエラー>` |
 
 `MergeDNSSECKey` が返すエラー:
 
