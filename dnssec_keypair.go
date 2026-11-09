@@ -104,7 +104,7 @@ func readDNSSECKeyPairPrivateFile(filename string) (*DNSSECKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read private key file %s: %w", filename, err)
 	}
-	return parsePrivateKeyData(withoutPrivateNameLine(data), filename)
+	return parsePrivateKeyData(withoutPrivateNameLine(data), filename, "private key file "+filename)
 }
 
 // withoutPrivateNameLine removes the lines whose field name is "Name" from the

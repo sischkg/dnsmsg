@@ -112,7 +112,7 @@ func ReadKeyFile(filename string) (*DNSSECKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read key file %s: %w", filename, err)
 	}
-	return parseKeyData(data, filename)
+	return parseKeyData(data, filename, "key file "+filename)
 }
 
 // ReadPrivateKeyFile reads a dnssec-keygen .private file and returns the
@@ -123,11 +123,16 @@ func ReadPrivateKeyFile(filename string) (*DNSSECKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cannot read private key file %s: %w", filename, err)
 	}
-	return parsePrivateKeyData(data, filename)
+	return parsePrivateKeyData(data, filename, "private key file "+filename)
 }
 
-// parseKeyData parses the contents of a .key file.
-func parseKeyData(data []byte, filename string) (*DNSSECKey, error) {
+// parseKeyData parses the contents of a .key file (or an equivalent byte
+// string).  source and desc say where data came from, for error messages:
+// source is named bare ("no DNSKEY record found in %s"), desc is the phrase
+// that introduces it ("cannot parse %s").  ReadKeyFile passes the file path
+// and "key file <path>"; the byte-string API in dnssec_parse.go passes the
+// same source label for both.
+func parseKeyData(data []byte, source, desc string) (*DNSSECKey, error) {
 	lines := strings.Split(string(data), "\n")
 	for _, raw := range lines {
 		line := strings.TrimSpace(raw)
@@ -140,11 +145,11 @@ func parseKeyData(data []byte, filename string) (*DNSSECKey, error) {
 		}
 		key, err := parseKeyLine(line)
 		if err != nil {
-			return nil, fmt.Errorf("cannot parse key file %s: %w", filename, err)
+			return nil, fmt.Errorf("cannot parse %s: %w", desc, err)
 		}
 		return key, nil
 	}
-	return nil, fmt.Errorf("no DNSKEY record found in %s", filename)
+	return nil, fmt.Errorf("no DNSKEY record found in %s", source)
 }
 
 // parseKeyLine parses a single DNSKEY record line from a .key file.
@@ -203,8 +208,11 @@ func parseKeyLine(line string) (*DNSSECKey, error) {
 }
 
 // parsePrivateKeyData parses the contents of a dnssec-keygen .private file
-// (Private-key-format v1.3).
-func parsePrivateKeyData(data []byte, filename string) (*DNSSECKey, error) {
+// (Private-key-format v1.3).  source and desc describe where data came for
+// error messages, the same way parseKeyData uses them: ReadPrivateKeyFile
+// passes the file path and "private key file <path>", the byte-string API in
+// dnssec_parse.go passes the same source label for both.
+func parsePrivateKeyData(data []byte, source, desc string) (*DNSSECKey, error) {
 	key := &DNSSECKey{
 		PrivateParams: make(map[string][]byte),
 	}
@@ -229,7 +237,7 @@ func parsePrivateKeyData(data []byte, filename string) (*DNSSECKey, error) {
 		case "algorithm":
 			alg, err := parsePrivateAlgorithm(value)
 			if err != nil {
-				return nil, fmt.Errorf("cannot parse private key file %s: %w", filename, err)
+				return nil, fmt.Errorf("cannot parse %s: %w", desc, err)
 			}
 			key.Algorithm = alg
 		case "created", "publish", "activate":
@@ -239,7 +247,7 @@ func parsePrivateKeyData(data []byte, filename string) (*DNSSECKey, error) {
 			// base64-encoded material.
 			decoded, err := decodeBase64(value)
 			if err != nil {
-				return nil, fmt.Errorf("cannot decode private key parameter %q in %s: %w", name, filename, err)
+				return nil, fmt.Errorf("cannot decode private key parameter %q in %s: %w", name, source, err)
 			}
 			key.PrivateParams[name] = decoded
 			if strings.EqualFold(name, "privatekey") || strings.EqualFold(name, "privateexponent") {
@@ -249,7 +257,7 @@ func parsePrivateKeyData(data []byte, filename string) (*DNSSECKey, error) {
 	}
 
 	if key.Algorithm == 0 {
-		return nil, fmt.Errorf("no algorithm found in private key file %s", filename)
+		return nil, fmt.Errorf("no algorithm found in %s", desc)
 	}
 	return key, nil
 }
