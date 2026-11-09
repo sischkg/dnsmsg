@@ -53,12 +53,15 @@ func ReadDNSSECKeyFiles(keyFile, privateFile string) (*DNSSECKey, error) {
 		return nil, err
 	}
 
-	merged, err := mergeDNSSECKeyPair(public, private, keyFile, privateFile)
+	// mergeDNSSECKeyParts and validateMergedDNSSECKey are the same helpers
+	// MergeDNSSECKey uses; the errors they report are given the file names that
+	// produced them here.
+	merged, err := mergeDNSSECKeyParts(public, private)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("DNSSEC key pair %s and %s: %w", keyFile, privateFile, err)
 	}
-	if err := validateDNSSECKeyPair(merged, keyFile, privateFile); err != nil {
-		return nil, err
+	if err := validateMergedDNSSECKey(merged); err != nil {
+		return nil, fmt.Errorf("DNSSEC key pair %s and %s: %w", keyFile, privateFile, err)
 	}
 	return merged, nil
 }
@@ -142,56 +145,6 @@ func containsPrivateNameLine(data []byte) bool {
 		}
 		name, _, ok := strings.Cut(line, ":")
 		if ok && strings.EqualFold(strings.TrimSpace(name), "Name") {
-			return true
-		}
-	}
-	return false
-}
-
-// mergeDNSSECKeyPair combines the key read from a .key file with the key read
-// from the .private file of the same pair.  The .key file is the source of the
-// owner name, flags, protocol and public key material; the .private file is the
-// source of the private key material.  The two files must agree on the
-// algorithm, because a pair whose two halves name different algorithms is a
-// mixture of two keys and no key at all.
-func mergeDNSSECKeyPair(public, private *DNSSECKey, keyFile, privateFile string) (*DNSSECKey, error) {
-	if public.Algorithm != private.Algorithm {
-		return nil, fmt.Errorf("DNSSEC key pair %s and %s: the key file uses algorithm %d (%s) but the private key file uses algorithm %d (%s)",
-			keyFile, privateFile,
-			public.Algorithm, DNSSECAlgorithm(public.Algorithm),
-			private.Algorithm, DNSSECAlgorithm(private.Algorithm))
-	}
-
-	merged := *public
-	merged.PrivateKey = private.PrivateKey
-	merged.PrivateParams = private.PrivateParams
-	return &merged, nil
-}
-
-// validateDNSSECKeyPair reports a key pair that cannot be used as a whole.  A
-// pair that carries private material and whose algorithm this package can sign
-// with must produce a signer, which is where a private key that does not belong
-// to the public key of the .key file is found.  A pair without private material,
-// or for an algorithm that cannot be signed with, has nothing here to check and
-// is loaded as it is.
-func validateDNSSECKeyPair(key *DNSSECKey, keyFile, privateFile string) error {
-	if len(key.PrivateKey) == 0 && len(key.PrivateParams) == 0 {
-		return nil
-	}
-	if !supportedDNSSECAlgorithmForSigning(key.Algorithm) {
-		return nil
-	}
-	if _, err := NewDNSSECSigner(key); err != nil {
-		return fmt.Errorf("DNSSEC key pair %s and %s: %w", keyFile, privateFile, err)
-	}
-	return nil
-}
-
-// supportedDNSSECAlgorithmForSigning reports whether algorithm is one of the
-// algorithms SupportedDNSSECAlgorithms says this package can sign with.
-func supportedDNSSECAlgorithmForSigning(algorithm uint8) bool {
-	for _, supported := range SupportedDNSSECAlgorithms() {
-		if supported == algorithm {
 			return true
 		}
 	}
