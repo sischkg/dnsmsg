@@ -1,6 +1,6 @@
 # DNSSEC の鍵ファイル・署名鍵・キータグ（dnssec-keygen 鍵ファイル対応）
 
-`dnsmsg` パッケージでは、BIND に付属する `dnssec-keygen` で生成した DNSSEC 鍵ファイル（`.key` / `.private`）を読み込み、`DNSSECKey` 構造体として取得できます。読み込んだ鍵は `RecordDNSKEY` に変換してゾーンファイルに公開でき、`NewDNSSECSigner` で `crypto.Signer` に変換して `SignRRSet` の署名鍵にできます。`KeyTag` 系の API は RFC 4034 Appendix B の DNSKEY キータグを計算します。
+`dnsmsg` パッケージでは、BIND に付属する `dnssec-keygen` で生成した DNSSEC 鍵ファイル（`.key` / `.private`）を読み込み、`DNSSECKey` 構造体として取得できます。読み込んだ鍵は `RecordDNSKEY` に変換してゾーンファイルに公開でき、`NewDNSSECSigner` で `crypto.Signer` に変換して `SignRRSet` の署名鍵にできます。`KeyTag` 系の API は RFC 4034 Appendix B の DNSKEY キータグを計算します。鍵の内容をファイルそのものではなくバイト列や `io.Reader` として受け取っている場合は、`ParseDNSSECKey` / `ReadDNSSECKey` 系の API で同じパース規則をファイルに触れずに適用できます。
 
 ## `DNSSECKey` 構造体
 
@@ -20,6 +20,13 @@
 |-----|------|
 | `ReadKeyFile(filename string) (*DNSSECKey, error)` | `.key` ファイルを読み込み、最初の DNSKEY レコード行をパースして `DNSSECKey` を返す |
 | `ReadPrivateKeyFile(filename string) (*DNSSECKey, error)` | `.private` ファイル（Private-key-format v1.3）を読み込み、アルゴリズム番号と秘密パラメータを抽出する |
+| `ParseDNSSECKey(data []byte) (*DNSSECKey, error)` | `.key` ファイルの内容そのものをバイト列からパースする（ファイルは読まない。`ReadKeyFile` からファイル読み込みを除いたもの） |
+| `ParseDNSSECKeyWithSource(data []byte, source string) (*DNSSECKey, error)` | 同じパースを行い、エラーメッセージでの入力の呼び名に `source` を使う |
+| `ParseDNSSECPrivateKey(data []byte) (*DNSSECKey, error)` | `.private` ファイルの内容そのものをバイト列からパースする（ファイルは読まない） |
+| `ParseDNSSECPrivateKeyWithSource(data []byte, source string) (*DNSSECKey, error)` | 同じパースを行い、エラーメッセージでの入力の呼び名に `source` を使う |
+| `ParseDNSSECKeyLine(line string) (*DNSSECKey, error)` | DNSKEY レコード 1 行（`.key` の DNSKEY 行の書式）をパースする |
+| `ReadDNSSECKey(r io.Reader) (*DNSSECKey, error)` | `r` を最後まで読んで `.key` 内容としてパースする（ファイルは読まない） |
+| `ReadDNSSECPrivateKey(r io.Reader) (*DNSSECKey, error)` | `r` を最後まで読んで `.private` 内容としてパースする（ファイルは読まない） |
 | `ReadDNSSECKeyPair(baseName string) (*DNSSECKey, error)` | 同一の接頭辞を持つ `.key` と `.private` を読み、1 つの `DNSSECKey` に統合する |
 | `ReadDNSSECKeyFiles(keyFile, privateFile string) (*DNSSECKey, error)` | 2 つのファイル名を直接指定して同じ統合を行う |
 | `MergeDNSSECKey(public, private *DNSSECKey) (*DNSSECKey, error)` | 公開鍵の半分と秘密鍵の半分を 1 つの `DNSSECKey` に統合する（ファイルは読まない。`ReadDNSSECKeyFiles` はこの統合の上にファイル名の情報を載せたもの） |
@@ -275,6 +282,120 @@ if err != nil {
 
 `ReadDNSSECKeyPair` はこれと同じことに、2 つのファイル名の解決と `.private` の `Name:` 行の
 除去を足した関数です。
+
+## 鍵の内容を直接パースする（`ParseDNSSECKey` / `ReadDNSSECKey`）
+
+```go
+func ParseDNSSECKey(data []byte) (*DNSSECKey, error)
+func ParseDNSSECKeyWithSource(data []byte, source string) (*DNSSECKey, error)
+func ParseDNSSECPrivateKey(data []byte) (*DNSSECKey, error)
+func ParseDNSSECPrivateKeyWithSource(data []byte, source string) (*DNSSECKey, error)
+func ParseDNSSECKeyLine(line string) (*DNSSECKey, error)
+func ReadDNSSECKey(r io.Reader) (*DNSSECKey, error)
+func ReadDNSSECPrivateKey(r io.Reader) (*DNSSECKey, error)
+```
+
+`ReadKeyFile` と `ReadPrivateKeyFile` は「ファイルを読む」と「内容を読む」の 2 つの手順の
+組み合わせです。この節の API はそのうち読む手順だけで、ファイルに触れずに
+`ReadKeyFile` / `ReadPrivateKeyFile` と同じ書式規則・同じフィールド設定・同じエラー判定を
+適用します。鍵の内容をすでに別の方法で得ている呼び出し側は、ファイルを経由せずに
+こちらを呼べます。
+
+- プログラムに埋め込んだ鍵（`go:embed` した `.key` / `.private` 相当の内容）
+- 設定ストア、データベース、API などから取り出した鍵の内容
+- テストのためにメモリ内で組み立てた鍵の内容
+
+これらの関数はファイルを開きません。ファイルそのものからの読み込みは
+従来どおり `ReadKeyFile` / `ReadPrivateKeyFile` の仕事です。
+
+| 関数 | 受け取るもの |
+|------|-------------|
+| `ParseDNSSECKey` / `ParseDNSSECKeyWithSource` | `.key` ファイルの内容そのもの（DNSKEY レコード行を含むバイト列） |
+| `ParseDNSSECPrivateKey` / `ParseDNSSECPrivateKeyWithSource` | `.private` ファイルの内容そのもの（Private-key-format v1.3） |
+| `ParseDNSSECKeyLine` | DNSKEY レコード 1 行（`.key` の DNSKEY 行と同じ書式） |
+| `ReadDNSSECKey` / `ReadDNSSECPrivateKey` | `io.Reader`。最後まで 1 回読んでから、その内容を `.key` / `.private` 内容としてパースします |
+
+同じ内容からは、ファイルを読む API と同じ `DNSSECKey` が返ります。
+
+### パース規則はファイル読み込みと同じ
+
+- 空行・`;` や `#` のコメント行・`$ORIGIN` などのゾーンファイルディレクティブを無視し、
+  内容の中の**最初の DNSKEY レコード**だけを使う、公開鍵の base64 が空白で複数の
+  チャンクに分かれていれば連結して復号する、といった扱いは「キーファイル形式」に
+  書いたとおりで、ファイルを読む API とすべて同一です。
+- 空の内容、DNSKEY レコードを含まない内容、`Algorithm` 行のない `.private` 内容も
+  エラーです。エラーなしに `nil` の鍵が返ることはありません。
+- `.key` 相当の内容は `Name`・`Flags`・`Protocol`・`Algorithm`・`PublicKey` に、
+  `.private` 相当の内容は `PrivateKey`・`PrivateParams` に、ファイルを読む API と
+  同じフィールド設定で入ります。
+- `.private` の `Name:` 行はこの経路では拒否されます（「`.private` の `Name:` 行」参照）。
+  1 組の鍵として読む場合は `ReadDNSSECKeyPair` / `ReadDNSSECKeyFiles` を使ってください。
+- `ParseDNSSECKeyLine` は渡された 1 行だけをパースします。前後の空白は無視されますが、
+  複数行の内容やコメントの扱いはありません。複数の DNSKEY レコードを含む内容を
+  扱う場合は、行に分割して `ParseDNSSECKeyLine` を行ごとに使ってください。
+
+### エラーメッセージでの入力の呼び名
+
+ファイルを読む API のエラーは、入力をファイル名で指します
+（`no DNSKEY record found in <filename>` など）。この API はファイル名を受け取らないため、
+入力を既定の呼び名で指します。
+
+| API | エラーでの入力の呼び名 |
+|-----|----------------------|
+| `ParseDNSSECKey` / `ReadDNSSECKey` | `DNSSEC key data` |
+| `ParseDNSSECPrivateKey` / `ReadDNSSECPrivateKey` | `DNSSEC private key data` |
+| `ParseDNSSECKeyWithSource` / `ParseDNSSECPrivateKeyWithSource` | 呼び出し側が渡した `source`（空文字列なら上の既定名） |
+
+`source` はそのデータがどこから来たかを説明する任意の文章です
+（`Kexample.com.+008+26415 embedded in config` など）。データが元あった場所の名前を
+そのまま渡せば、エラーはファイルを読む API と同じ場所を同じ理由で指します
+（文言の違いは「エラーハンドリング」に書きました）。
+
+### Reader から読む
+
+`ReadDNSSECKey` と `ReadDNSSECPrivateKey` は `r` を最後まで 1 回読んでから、その内容を
+上記と同じパースにかけます。読み取りそのものが失敗したときは
+`cannot read DNSSEC key data: <読み取りのエラー>`、
+`cannot read DNSSEC private key data: <読み取りのエラー>` として返ります。
+これらもファイルを開きません。
+
+### バイト列から読んで統合する
+
+2 組の内容がファイルではなく文字列として手元にある場合の流れです。
+
+```go
+publicData := []byte(`example.com. IN DNSKEY 257 3 8 <base64-public-key>`)
+privateData := []byte(`Private-key-format: v1.3
+Algorithm: 8 (RSA)
+Modulus: <base64>
+PrivateExponent: <base64>`)
+
+public, err := dnsmsg.ParseDNSSECKeyWithSource(publicData, "embedded Kexample.com.+008+26415")
+if err != nil {
+	log.Fatal(err)
+}
+private, err := dnsmsg.ParseDNSSECPrivateKeyWithSource(privateData, "embedded Kexample.com.+008+26415 private")
+if err != nil {
+	log.Fatal(err)
+}
+
+key, err := dnsmsg.MergeDNSSECKey(public, private)
+if err != nil {
+	log.Fatal(err)
+}
+
+signer, err := dnsmsg.NewDNSSECSigner(key)
+if err != nil {
+	log.Fatal(err)
+}
+```
+
+`MergeDNSSECKey` は 2 つの半分がどこから来たかを問いません。この組み方で得った鍵も、
+ファイルから読んだ鍵と同じ使えます（「公開鍵と秘密鍵の統合（`MergeDNSSECKey`）」の
+「使用例」と同じ続き方です）。
+
+`ReadKeyFile` と `ReadPrivateKeyFile` は、このパースにファイル読み込みを足した関数です。
+パース規則と返る鍵は同一で、エラーの違いは入力の呼び名だけです。
 
 ## 公開鍵の構築（`NewDNSSECPublicKey`）
 
@@ -610,9 +731,37 @@ if err != nil {
 エラーは `NewDNSSECSigner` のそのままの文言で返ります。鍵ペアを読む経路は同じエラーに
 2 つのファイル名を添えます（`DNSSEC key pair <key file> and <private file>: ...`）。
 
+`ParseDNSSECKey` / `ParseDNSSECPrivateKey` / `ReadDNSSECKey` / `ReadDNSSECPrivateKey` が返すエラー:
+
+| ケース | エラー内容 |
+|------|-----------|
+| 内容に DNSKEY レコードがない（空の入力を含む） | `no DNSKEY record found in <入力の呼び名>` |
+| DNSKEY 行が不正 | `cannot parse <入力の呼び名>: <上記の表と同じ行パースのエラー>` |
+| `.private` 内容に `Algorithm` 行がない（空の入力を含む） | `no algorithm found in <入力の呼び名>` |
+| `.private` の `Algorithm` の値が不正 | `cannot parse <入力の呼び名>: empty algorithm value ...`、`cannot parse <入力の呼び名>: invalid algorithm number ...` |
+| `.private` のパラメータの base64 が不正（`Name:` 行を含む `.private` もここ） | `cannot decode private key parameter "<name>" in <入力の呼び名>: illegal base64 data...` |
+| `io.Reader` からの読み取りが失敗 | `cannot read DNSSEC key data: <読み取りのエラー>`、`cannot read DNSSEC private key data: <読み取りのエラー>` |
+
+`<入力の呼び名>` は「鍵の内容を直接パースする」の「エラーメッセージでの入力の呼び名」で説明した
+既定の名前（`DNSSEC key data` / `DNSSEC private key data`）、または `ParseDNSSECKeyWithSource` /
+`ParseDNSSECPrivateKeyWithSource` に渡した名前です。`ParseDNSSECKeyLine` のエラーは上の表の各行の
+行パースそのものの文言（`invalid DNSKEY key line ...` など）で、`cannot parse ...` の前置きは付きません。
+入力が 1 行直接渡されているためです。
+
+これらのエラーは `ReadKeyFile` / `ReadPrivateKeyFile` のエラーと同じ組み立てで、同じ失敗理由を報告します:
+
+- パース対象をそのまま名乗るエラー（`no DNSKEY record found in <name>`、
+  `cannot decode private key parameter "<name>" in <name>`）は、バイト列 API に
+  `ParseDNSSECKeyWithSource(data, <path>)` / `ParseDNSSECPrivateKeyWithSource(data, <path>)`
+  と元のファイル名を渡すと、ファイル API の対応するエラーと完全に同一の文字列になります。
+- `cannot parse ...` と `no algorithm found in ...` が引入するエラーは、入力を導入する文言だけが
+  違います。ファイル API は `key file <path>` / `private key file <path>` と呼び、
+  バイト列 API は渡された名前をそのまま使います。包まれている中身（上記の表のパースエラー）は
+  同一です。
+
 ## 補足
 
-- `ReadKeyFile` / `ReadPrivateKeyFile` はファイルの **最初の一致レコード** しか返しません。複数の鍵を含むファイルがある場合は、ファイルを分割するか、独自に複数行をパースしてください。
+- `ReadKeyFile` / `ReadPrivateKeyFile` / `ParseDNSSECKey` / `ParseDNSSECPrivateKey` は入力の **最初の一致レコード** しか返しません。複数の鍵を含むファイルがある場合は、ファイルを分割して 1 行ずつ `ParseDNSSECKeyLine` でパースするか、独自に複数行をパースしてください。
 - base64 の **出力**（`RecordDNSKEY.String()` など）はパディングなし（RawStdEncoding）でエンコードされます。**入力**（`.key` / `.private` の読み取り）はパディングの有無を問わず受け付けます（まずパディングありで復号を試み、失敗した場合にパディングなしで復号します）。
 - 秘密鍵（`PrivateKey` / `PrivateParams`）は平文で扱われるため、ファイルのアクセス権限（例: `0600`）など取り扱いに注意してください。
 - `.private` の鍵から `crypto.Signer` を作って RRSet に署名し、DNSKEY で検証する一連の手順は [rrset.md](rrset.md) の「DNSSEC 署名と検証」にあります。ゾーン全体に署名する場合は [zone.md](zone.md) の `Zone.Sign` を参照してください。
