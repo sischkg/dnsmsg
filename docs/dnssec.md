@@ -20,6 +20,8 @@
 |-----|------|
 | `ReadKeyFile(filename string) (*DNSSECKey, error)` | `.key` ファイルを読み込み、最初の DNSKEY レコード行をパースして `DNSSECKey` を返す |
 | `ReadPrivateKeyFile(filename string) (*DNSSECKey, error)` | `.private` ファイル（Private-key-format v1.3）を読み込み、アルゴリズム番号と秘密パラメータを抽出する |
+| `ReadDNSSECKeyPair(baseName string) (*DNSSECKey, error)` | 同一の接頭辞を持つ `.key` と `.private` を読み、1 つの `DNSSECKey` に統合する |
+| `ReadDNSSECKeyFiles(keyFile, privateFile string) (*DNSSECKey, error)` | 2 つのファイル名を直接指定して同じ統合を行う |
 | `(*DNSSECKey).ToDNSKEY() RecordDNSKEY` | 鍵を `RecordDNSKEY` に変換（公開鍵のみ。秘密鍵は DNSKEY レコードに含まれない） |
 | `NewDNSSECPublicKey(algorithm uint8, material []byte) (crypto.PublicKey, error)` | DNSKEY の公開鍵マテリアルから `crypto.PublicKey` を構築（`VerifyRRSet` の `pubkey` に渡せます） |
 | `NewDNSSECSigner(key *DNSSECKey) (crypto.Signer, error)` | 鍵ファイルから復元した秘密鍵を `crypto.Signer` に変換（`SignRRSet` の署名鍵として使えます） |
@@ -72,6 +74,88 @@ Activate: 20230101000000
 - `PrivateExponent`（または `PrivateKey`）は `PrivateKey` フィールドにもコピーされます
 - `Created` / `Publish` / `Activate` などの時刻行は情報目的のみで無視されます
 
+## 鍵ペアの読み込み（`ReadDNSSECKeyPair` / `ReadDNSSECKeyFiles`）
+
+署名には `.private` の秘密鍵マテリアルと `.key` の公開鍵マテリアルの両方が必要です。
+`ReadDNSSECKeyPair` は `dnssec-keygen` が 1 組の鍵に対して生成する 2 つのファイルを読み、
+それらを 1 つの `*DNSSECKey` に統合します。
+
+```go
+// どの表記でも同じ 1 組を指定する
+key, err := dnsmsg.ReadDNSSECKeyPair("Kexample.com.+013+39506")
+key, err := dnsmsg.ReadDNSSECKeyPair("Kexample.com.+013+39506.key")
+key, err := dnsmsg.ReadDNSSECKeyPair("Kexample.com.+013+39506.private")
+
+// ファイル名を直接指定することもできる
+key, err := dnsmsg.ReadDNSSECKeyFiles(
+	"/etc/bind/Kexample.com.+013+39506.key",
+	"/etc/bind/Kexample.com.+013+39506.private",
+)
+```
+
+2 つのファイルはどちらも欠けていればエラーになります。どちらか一方だけを読む既存の
+`ReadKeyFile` / `ReadPrivateKeyFile` はそのまま使えます。
+
+### 統合されるフィールド
+
+| 供給するファイル | `DNSSECKey` のフィールド |
+|------------------|---------------------------|
+| `.key` | `Name`（所有者名）、`Flags`、`Protocol`、`Algorithm`、`PublicKey` |
+| `.private` | `Algorithm`、`PrivateKey`、`PrivateParams` |
+
+ファイルが 1 組の鍵から来ていれば両方の `Algorithm` は同じ値です。一致しない場合は
+エラーになり、どちらのファイルがどちらのアルゴリズムを主張しているかが報告されます
+（「エラーハンドリング」を参照）。
+
+統合された鍵はこのまま使えます。
+
+- `key.ToDNSKEY()` は `.key` の DNSKEY レコードと同じ RDATA を返す
+- `key.KeyTag()` は公開鍵マテリアルがあるためエラーにならない
+- `NewDNSSECSigner(key)` は秘密鍵マテリアルから `crypto.Signer` を組み、導出した公開鍵を
+  `.key` の公開鍵マテリアルと照合する
+- したがって `SignRRSet` に渡す `keyTag` は `key.ToDNSKEY().KeyTag()` と一致する
+
+### `baseName` の解決
+
+`baseName` は 2 つのファイルが共有する接頭辞です。
+
+- 拡張子が無い場合はそのまま 2 つのファイル名を組み立てます
+  （`Kexample.com.+008+12345` → `Kexample.com.+008+12345.key` と
+  `Kexample.com.+008+12345.private`）
+- `.key` または `.private` で終わる場合は、その拡張子を取り除いてから組み立てます
+  （`.private` を渡した場合も同じ 1 組が読めます）
+- 取り除かれるのは完全に小文字で書かれた `.key` と `.private` だけです。`.KEY` のように
+  大文字を交えた拡張子はエラーになります
+- 空の文字列、および `.key` だけ・`.private` だけのような空の基底名はエラーになります
+
+ファイルは `ReadKeyFile` / `ReadPrivateKeyFile` と同じくローカルファイルシステムから
+読みます（作業ディレクトリからの相対パスまたは絶対パス）。
+
+### 読み込み時の検証
+
+統合した鍵は `NewDNSSECSigner` に渡せる状態かを確認します。ただし検証するのは
+`.private` が秘密鍵マテリアルを持ち、かつアルゴリズムが `SupportedDNSSECAlgorithms()`
+に含まれる場合だけです。
+
+- `.private` が `Algorithm` 行しか持たないなど、秘密鍵マテリアルが無い 1 組は検証できる
+  ものが無いのでそのまま返す（`ToDNSKEY()` と `KeyTag()` はそのまま使えるが、
+  `NewDNSSECSigner` は従来どおり `has no private key material` でエラーになる）
+- `NewDNSSECSigner` が扱わないアルゴリズム（1、2、3、6、12、16 など）の鍵もそのまま読める
+  （`ToDNSKEY()` と `KeyTag()` を使う目的に署名の失敗を混ぜないため）
+- 検証は署名を作りません。秘密鍵マテリアルから導出した公開鍵が `.key` の公開鍵と
+  一致するかを見るだけで、乱数は使いません
+
+### `.private` の `Name:` 行
+
+`Private-key-format` の名前空間に所有者名を載せる標準の行はありませんが、`.private` に
+`Name:` 行を書く書式もあります。鍵ペアを読む経路ではその行を、値に関係なくすべて
+除去し、`.key` の所有者名を正として使います。
+
+これは鍵ペアを読む経路だけの扱いで、`ReadPrivateKeyFile` は単独では従来どおり
+`cannot decode private key parameter "Name" in <path>` でエラーになります。
+所有者名と秘密鍵マテリアルの両方が必要なら、その 1 組を `ReadKeyFile` と
+`ReadPrivateKeyFile` で別々に読むのではなく `ReadDNSSECKeyPair` で読んでください。
+
 ## 公開鍵の構築（`NewDNSSECPublicKey`）
 
 ```go
@@ -108,6 +192,21 @@ if err != nil {
 // signer は crypto.Signer。SignRRSet にそのまま渡せる。
 ```
 
+1 組の鍵をまとめて読む場合は `ReadDNSSECKeyPair` が `.private` と `.key` を統合した
+`*DNSSECKey` を返すので、その鍵から `crypto.Signer` を組みます。
+
+```go
+key, err := dnsmsg.ReadDNSSECKeyPair("Kexample.com.+013+39506")
+if err != nil {
+	log.Fatal(err)
+}
+
+signer, err := dnsmsg.NewDNSSECSigner(key)
+if err != nil {
+	log.Fatal(err)
+}
+```
+
 受け付けるアルゴリズムと、それぞれの秘密鍵に必要なパラメータ（RFC 4034 Appendix D、RFC 6605、RFC 8080）:
 
 | アルゴリズム | 必要な秘密パラメータ | 返される型 |
@@ -120,7 +219,7 @@ if err != nil {
 - 秘密パラメータは `ReadPrivateKeyFile` が base64 からデコード済みのオクテット列として `PrivateParams` に入れています。`NewDNSSECSigner` は再度のデコード（16 進数や base64 の再解釈）を行いません。
 - パラメータ名は大文字・小文字を区別しません（`Privatekey` のような綴りも受け付けます）。名前で見つからない場合は `DNSSECKey.PrivateKey`（`ReadPrivateKeyFile` が秘密指数・秘密スカラーを写すフィールド）が使われます。RSA の素数 2 つは 1 つのオクテット列にまとめられないため、名前付きパラメータからのみ読まれます。
 - 秘密スカラーと seed の長さは固定です（ECDSA は曲線の位数のオクテット数、Ed25519 は 32 オクテット）。長さが違う鍵は、鍵を組み立てる前に検出されます（`ed25519.NewKeyFromSeed` は短い入力で panic するため、先に検査します）。
-- `DNSKEY` の公開鍵（`PublicKey`）が設定されている場合は、秘密鍵から導出した公開鍵と比較し、一致しなければエラーにします。`.private` ファイル単体で読んだ鍵は公開鍵を持たないため、この比較は行われません。
+- `DNSKEY` の公開鍵（`PublicKey`）が設定されている場合は、秘密鍵から導出した公開鍵と比較し、一致しなければエラーにします。`.private` ファイル単体で読んだ鍵は公開鍵を持たないため、この比較は行われません。`ReadDNSSECKeyPair` で読んだ鍵ペアでは両方のマテリアルが揃うため、この比較が必ず行われます。
 - RSA の `Prime1` / `Prime2` は任意です。両方揃っている場合は `Validate` と `Precompute`（CRT 値の事前計算。多くの RRSet に署名する場合に速くなります）を通します。両方ない場合は `Modulus` / `PublicExponent` / `PrivateExponent` だけを検査し、`rsa.PrivateKey` は一般経路で署名します。`Exponent1` / `Exponent2` / `Coefficient` は読みません。これらの値は素数と秘密指数から導出できるので、ファイルに書かれていても署名には使いません。
 - 乱数は使いません。同じ秘密パラメータからは常に同じ鍵が得られます。
 
@@ -148,7 +247,7 @@ fmt.Println(dnsmsg.DNSSECKeyTag(dnskey.CanonicalWireFormat())) // 生の RDATA �
 
 - `SignRRSet` は `keyTag` を引数として受け取るため、値は呼び出し側が決めます。`(*DNSSECKey).KeyTag()` で計算した値をそのまま渡せば、生成される RRSIG の `KeyTag` フィールドが署名鍵の実際のキータグと一致します。
 - 検証側が使う `VerifyRRSetWithDNSKEY` は渡された `RecordDNSKEY` をそのまま使い、アルゴリズムが RRSIG と違う場合だけエラーにします（`DNSKEY algorithm N does not match RRSIG algorithm M`）。複数の DNSKEY があるゾーンでどの鍵で検証するかを選ぶのは呼び出し側の仕事です。その判断には `RecordDNSKEY.KeyTag()` と `RecordRRSIG.KeyTag` を比較するのが定石です（RFC 4034 Section 3.1.1）。
-- `(*DNSSECKey).KeyTag()` が公開鍵のない鍵でエラーにするのは、flags・protocol・algorithm の 4 オクテットだけの合計は見た目はキータグですが実際のキータグではないためです。`.private` 単体の鍵でキータグが必要な場合は、同じ名前の `.key` ファイルの公開鍵を `PublicKey` に設定してから計算してください。
+- `(*DNSSECKey).KeyTag()` が公開鍵のない鍵でエラーにするのは、flags・protocol・algorithm の 4 オクテットだけの合計は見た目はキータグですが実際のキータグではないためです。`.private` 単体の鍵でキータグが必要な場合は、同じ名前の `.key` ファイルの公開鍵を `PublicKey` に設定してから計算してください。その 1 組をまとめて読むには `ReadDNSSECKeyPair` を使います。
 
 ## 使用例
 
@@ -244,7 +343,7 @@ db := dnsmsg.NewNameCompressionDB()
 rr.AppendWireFormat(&w, db)
 ```
 
-### 4) `.private` と `.key` を組み合わせて署名し、DNSKEY で検証する
+### 4) 鍵ペアを読んで署名し、DNSKEY で検証する
 
 ```go
 package main
@@ -258,35 +357,25 @@ import (
 )
 
 func main() {
-	// dnssec-keygen の同一接頭辞を持つ .private と .key を読む
-	base := "Kexample.com.+013+39506"
-	private, err := dnsmsg.ReadPrivateKeyFile(base + ".private")
-	if err != nil {
-		log.Fatal(err)
-	}
-	keyFile, err := dnsmsg.ReadKeyFile(base + ".key")
+	// dnssec-keygen の同一接頭辞を持つ .private と .key を 1 つの鍵として読む
+	key, err := dnsmsg.ReadDNSSECKeyPair("Kexample.com.+013+39506")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	// 公開鍵マテリアルを合わせると NewDNSSECSigner が秘密鍵と照合する
-	private.PublicKey = keyFile.PublicKey
-
-	signer, err := dnsmsg.NewDNSSECSigner(private)
+	// 公開鍵マテリアルが揃っているので NewDNSSECSigner は秘密鍵と照合する
+	signer, err := dnsmsg.NewDNSSECSigner(key)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// SignRRSet はキータグを引数として受け取る。DNSKEY から計算した値を渡す
-	tag, err := private.KeyTag()
+	tag, err := key.KeyTag()
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	name, err := dnsmsg.NewDomainNameFromString("example.com.")
-	if err != nil {
-		log.Fatal(err)
-	}
+	name := key.Name
 	rs := dnsmsg.NewRRSet(
 		name,
 		dnsmsg.CLASS_IN,
@@ -299,7 +388,7 @@ func main() {
 	rrsig, err := dnsmsg.SignRRSet(
 		&rs,
 		signer,
-		private.Algorithm,
+		key.Algorithm,
 		tag,
 		name,
 		uint32(now.Unix())-3600,
@@ -310,7 +399,7 @@ func main() {
 	}
 
 	// 同じ鍵の DNSKEY で検証する。キータグが RRSIG と一致していることも確認できる
-	dnskey := private.ToDNSKEY()
+	dnskey := key.ToDNSKEY()
 	if dnskey.KeyTag() != tag {
 		log.Fatalf("key tag mismatch: %d != %d", dnskey.KeyTag(), tag)
 	}
@@ -321,6 +410,27 @@ func main() {
 	fmt.Printf("verified %s with key tag %d\n", name, tag)
 }
 ```
+
+既存の `ReadKeyFile` / `ReadPrivateKeyFile` で 2 つのファイルを別々に読む場合は、
+`NewDNSSECSigner` が秘密鍵と照合できるように `.key` の公開鍵マテリアルを統合した鍵に
+設定してください。
+
+```go
+base := "Kexample.com.+013+39506"
+
+private, err := dnsmsg.ReadPrivateKeyFile(base + ".private")
+if err != nil {
+	log.Fatal(err)
+}
+keyFile, err := dnsmsg.ReadKeyFile(base + ".key")
+if err != nil {
+	log.Fatal(err)
+}
+private.PublicKey = keyFile.PublicKey
+private.Name = keyFile.Name
+```
+
+`ReadDNSSECKeyPair` はこの統合（と 2 つの `Algorithm` の照合）を代わりに行います。
 
 ## エラーハンドリング
 
@@ -344,6 +454,16 @@ func main() {
 | 公開指数が DNSKEY と一致しない | `invalid RSA public exponent in DNSSEC key <name>: it must be at least 2 and less than 2^31` |
 | 秘密鍵から導出した公開鍵が DNSKEY の公開鍵と違う | `DNSSEC key <name>: its private key does not match its DNSKEY public key` |
 | `KeyTag` を公開鍵マテリアルなしで呼ぶ | `cannot compute the key tag of DNSSEC key <name>: no public key material` |
+
+`ReadDNSSECKeyPair` / `ReadDNSSECKeyFiles` が返すエラー:
+
+| ケース | エラー内容 |
+|------|-----------|
+| どちらかのファイルが読めない | 上記の `ReadKeyFile` / `ReadPrivateKeyFile` と同じエラー（解決されたファイル名を含む） |
+| 2 つのファイルの `Algorithm` が違う | `DNSSEC key pair <key file> and <private file>: the key file uses algorithm <n> (<name>) but the private key file uses algorithm <n> (<name>)` |
+| 統合後の鍵が署名に使えない | `DNSSEC key pair <key file> and <private file>: <NewDNSSECSigner のエラー>`（「読み込み時の検証」参照） |
+| 基底名が空 | `cannot read DNSSEC key pair: the base name is empty`、または拡張子だけのとき `cannot read DNSSEC key pair ".key": the base name is empty` |
+| 拡張子が小文字でつづられていない | `cannot read DNSSEC key pair <name>: the key file suffix is "<suffix>", which is not spelled in lower case` |
 
 ## 補足
 
