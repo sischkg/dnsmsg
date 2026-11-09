@@ -1,6 +1,6 @@
 # DNSSEC の鍵ファイル・署名鍵・キータグ（dnssec-keygen 鍵ファイル対応）
 
-`dnsmsg` パッケージでは、BIND に付属する `dnssec-keygen` で生成した DNSSEC 鍵ファイル（`.key` / `.private`）を読み込み、`DNSSECKey` 構造体として取得できます。読み込んだ鍵は `RecordDNSKEY` に変換してゾーンファイルに公開でき、`NewDNSSECSigner` で `crypto.Signer` に変換して `SignRRSet` の署名鍵にできます。`KeyTag` 系の API は RFC 4034 Appendix B の DNSKEY キータグを計算します。鍵の内容をファイルそのものではなくバイト列や `io.Reader` として受け取っている場合は、`ParseDNSSECKey` / `ReadDNSSECKey` 系の API で同じパース規則をファイルに触れずに適用できます。ファイルを開かずに鍵ファイルの**名前**（`K<name>+<alg>+<tag>`）だけから所属ドメイン名・アルゴリズム・キータグを取り出すのは `NewDNSSECKeyFileNameFromString` の仕事です。
+`dnsmsg` パッケージでは、BIND に付属する `dnssec-keygen` で生成した DNSSEC 鍵ファイル（`.key` / `.private`）を読み込み、`DNSSECKey` 構造体として取得できます。読み込んだ鍵は `RecordDNSKEY` に変換してゾーンファイルに公開でき、`NewDNSSECSigner` で `crypto.Signer` に変換して `SignRRSet` の署名鍵にできます。`KeyTag` 系の API は RFC 4034 Appendix B の DNSKEY キータグを計算します。鍵の内容をファイルそのものではなくバイト列や `io.Reader` として受け取っている場合は、`ParseDNSSECKey` / `ReadDNSSECKey` 系の API で同じパース規則をファイルに触れずに適用できます。ファイルを開かずに鍵ファイルの**名前**（`K<name>+<alg>+<tag>`）だけから所属ドメイン名・アルゴリズム・キータグを取り出すのは `NewDNSSECKeyFileNameFromString` の仕事です。`ReadPrivateKeyFile` が空で返す `DNSSECKey.Name` を同じファイル名から補うのは `InferDNSSECKeyNameFromFileName` の仕事です。
 
 ## `DNSSECKey` 構造体
 
@@ -38,6 +38,7 @@
 | `(*DNSSECKey).KeyTag() (uint16, error)` | 鍵の公開鍵材料からキータグを計算。公開鍵がない場合はエラー |
 | `NewDNSSECKeyFileNameFromString(path string) (DNSSECKeyFileName, error)` | `dnssec-keygen` の鍵**ファイル名**から所属ドメイン名・アルゴリズム・キータグを解析する（ファイルは開かない） |
 | `NewDNSSECKeyBaseName(name DomainName, algorithm uint8, keyTag uint16) string` | 3 つの値から `dnssec-keygen` が鍵ファイルに付ける基底名 `K<name>+<alg>+<tag>` を生成する |
+| `InferDNSSECKeyNameFromFileName(path string) (DomainName, error)` | `dnssec-keygen` の鍵ファイル名から所属ドメイン名だけを取り出す（ファイルは開かない。`.private` 単体の鍵の `Name` を補う）。名前を受け付ける規則は `NewDNSSECKeyFileNameFromString` と同じ |
 
 ## キーファイル形式
 
@@ -83,6 +84,12 @@ Activate: 20230101000000
 - その他の行（`Modulus`, `PrivateExponent` 等）は base64 でエンコードされたパラメータとして `PrivateParams` マップに格納されます
 - `PrivateExponent`（または `PrivateKey`）は `PrivateKey` フィールドにもコピーされます
 - `Created` / `Publish` / `Activate` などの時刻行は情報目的のみで無視されます
+- 所有者名はこの形式にはありません。`.private` だけを読む `ReadPrivateKeyFile` /
+  `ParseDNSSECPrivateKey` 系は `DNSSECKey.Name` を空（ラベル 0 個）で返します。これは仕様で、
+  ルートゾーン名（`.`、1 ラベル）と区別するためにあえて空のままにしています。`dnssec-keygen` は
+  鍵の所有者名をファイル名に書くので、ファイルから読んだ鍵にそれを設定するのは
+  `InferDNSSECKeyNameFromFileName` の仕事です（「鍵ファイル名の解析」参照）。1 組まとめて読む
+  `ReadDNSSECKeyPair` は `.key` の所有者名を使うので、そこでは不要です
 
 ## 鍵ペアの読み込み（`ReadDNSSECKeyPair` / `ReadDNSSECKeyFiles`）
 
@@ -165,6 +172,9 @@ key, err := dnsmsg.ReadDNSSECKeyFiles(
 `cannot decode private key parameter "Name" in <path>` でエラーになります。
 所有者名と秘密鍵マテリアルの両方が必要なら、その 1 組を `ReadKeyFile` と
 `ReadPrivateKeyFile` で別々に読むのではなく `ReadDNSSECKeyPair` で読んでください。
+`.key` を持たない `.private` について、`ReadPrivateKeyFile` はそのままで `Name` を空に返し、
+所属ドメイン名は `InferDNSSECKeyNameFromFileName`（「鍵ファイル名の解析」参照）が鍵ファイル名から
+補完します。
 
 上記の「読み込み時の検証」で説明している秘密鍵と公開鍵の照合は、
 `MergeDNSSECKey` が行うものと同じです。ただし `MergeDNSSECKey` は秘密鍵マテリアルを
@@ -490,7 +500,7 @@ fmt.Println(dnsmsg.DNSSECKeyTag(dnskey.CanonicalWireFormat())) // 生の RDATA �
 
 - `SignRRSet` は `keyTag` を引数として受け取るため、値は呼び出し側が決めます。`(*DNSSECKey).KeyTag()` で計算した値をそのまま渡せば、生成される RRSIG の `KeyTag` フィールドが署名鍵の実際のキータグと一致します。
 - 検証側が使う `VerifyRRSetWithDNSKEY` は渡された `RecordDNSKEY` をそのまま使い、アルゴリズムが RRSIG と違う場合だけエラーにします（`DNSKEY algorithm N does not match RRSIG algorithm M`）。複数の DNSKEY があるゾーンでどの鍵で検証するかを選ぶのは呼び出し側の仕事です。その判断には `RecordDNSKEY.KeyTag()` と `RecordRRSIG.KeyTag` を比較するのが定石です（RFC 4034 Section 3.1.1）。
-- `(*DNSSECKey).KeyTag()` が公開鍵のない鍵でエラーにするのは、flags・protocol・algorithm の 4 オクテットだけの合計は見た目はキータグですが実際のキータグではないためです。`.private` 単体の鍵でキータグが必要な場合は、同じ名前の `.key` ファイルの公開鍵を `PublicKey` に設定してから計算してください。その 1 組をまとめて読むには `ReadDNSSECKeyPair` を使います。
+- `(*DNSSECKey).KeyTag()` が公開鍵のない鍵でエラーにするのは、flags・protocol・algorithm の 4 オクテットだけの合計は見た目はキータグですが実際のキータグではないためです。`.private` 単体の鍵でキータグが必要な場合は、同じ名前の `.key` ファイルの公開鍵を `PublicKey` に設定してから計算してください。その 1 組をまとめて読むには `ReadDNSSECKeyPair` を使います。公開鍵がなくて問題になるのはキータグだけです。`.private` 単体の鍵に所属ドメイン名だけを設定するのは `InferDNSSECKeyNameFromFileName` の仕事で、その場合に `KeyTag()` は引き続きエラーになります（「鍵ファイル名の解析」参照）。
 
 ## 鍵ファイル名の解析（`NewDNSSECKeyFileNameFromString` / `NewDNSSECKeyBaseName`）
 
@@ -553,6 +563,42 @@ if computed != kn.KeyTag {
 ```
 
 `NewDNSSECKeyFileNameFromString` の返すエラーは「エラーハンドリング」の対応表に掲載しています。
+
+### 所属ドメイン名だけを得る（`InferDNSSECKeyNameFromFileName`）
+
+```go
+func InferDNSSECKeyNameFromFileName(path string) (DomainName, error)
+```
+
+`ReadPrivateKeyFile` は `.private` の中に所有者名を持たないので `Name` を空で返します（「`.private` ファイル」参照）。`dnssec-keygen` は鍵の所有者名をファイル名に書くので、その文字列から所属ドメイン名だけを取り出して鍵に設定するのがこのヘルパーの仕事です。
+
+- 名前を受け付ける規則は `NewDNSSECKeyFileNameFromString` とまったく同じです（「受け付ける名前」参照）。`path` のファイルは開きません
+- 返す値は `DomainName` 1 つだけです。アルゴリズムとキータグも必要なら `NewDNSSECKeyFileNameFromString` を使ってください
+- `dnssec-keygen` が生成していない名前は推測せずエラーにします。設定済みの `key.Name` を上書きするかどうかを決めるのも呼び出し側です
+- 1 組まとめて読むときは `ReadDNSSECKeyPair` が `.key` の所有者名を使うので、このヘルパーは必要ありません
+
+```go
+const privateFile = "keys/Kexample.com.+013+39506.private"
+
+key, err := dnsmsg.ReadPrivateKeyFile(privateFile)
+if err != nil {
+	log.Fatal(err)
+}
+
+// .private には所有者名が無い。同じ鍵のファイル名から補う
+key.Name, err = dnsmsg.InferDNSSECKeyNameFromFileName(privateFile)
+if err != nil {
+	log.Fatal(err)
+}
+
+fmt.Println(key.Name)                 // "example.com."
+fmt.Println(key.Algorithm)            // 13
+fmt.Println(len(key.PrivateKey) > 0)  // true
+```
+
+この `key` は秘密鍵マテリアルを持ちますが公開鍵を持たないままなので、`key.KeyTag()` はエラーのままです。公開鍵も必要なら同じ 1 組の `.key` を読む `ReadDNSSECKeyPair` を使ってください。
+
+`InferDNSSECKeyNameFromFileName` の返すエラーは `NewDNSSECKeyFileNameFromString` のエラーに前置き `cannot infer DNSSEC key name from <path>: ` を付けたもので、内側の判定とそのつづりは変わりません（「エラーハンドリング」参照）。
 
 ## 使用例
 
